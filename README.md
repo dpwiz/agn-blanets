@@ -1,0 +1,38 @@
+# Blanets
+
+An interactive model of the planets that may form in the dusty tori around supermassive black holes, after
+Mishra, Lyra, McKernan, Mac Low, Ford & Cook (2026), *Active Galactic Nucleus Tori: Potential Birthplace to Millions of Planets*
+([arXiv:2605.19241](https://arxiv.org/abs/2605.19241)).
+
+- **The torus**: the paper's magnetically supported disk, dust growth, streaming-instability filaments, planetesimal masses,
+  pebble and gas accretion, and population counts, all live and tunable.
+- **Fly**: Lambert transfers with porkchop plots, or a relativistic constant-acceleration torchship, chained into itineraries.
+- **Signal**: light and Shapiro delay, occultation by the black hole and inner disk, dust and gas opacity along the beam
+  (from the model's own grain sizes), AGN glare, Shannon data rates, and relay networks across a neighbourhood.
+- **Clocks**: gravitational and kinematic time dilation for bodies and your ship.
+
+## Running
+
+```sh
+npm install
+npm run dev        # local dev server
+npm test           # calibration against the paper's figures plus physics checks
+npm run build      # static site in dist/
+```
+
+## Calibration
+
+The paper leaves several inputs unstated. `tests/fixtures/paper-figs.json` holds curves digitized from the paper's own
+SVG figures. To regenerate it, serve the figure SVGs from the saved arXiv page over HTTP, evaluate
+`scripts/extract-svg-paths.js` in a page on that server with the list of figure names, save the returned JSON, and run
+`python3 scripts/digitize_figs.py <paths.json> tests/fixtures/paper-figs.json`.
+`tests/calibration.test.ts` checks the model against them, and `npx tsx tests/calibration-report.ts` prints the fit.
+Every parameter in `src/physics/params.ts` is tagged as taken from the paper, calibrated to its figures, or assumed,
+and the site shows the same tags.
+
+Known departures from the figures:
+
+- Fig 5 accretion rates match only in the "As in Fig 5" mode (Bondi everywhere, no cutoff); for v_frag = 10 m/s they
+  still differ by up to ~1 dex. The default mode follows the text's regime-dependent recipe instead.
+- Eq 25 (Klahr & Schreiber) as printed gives masses ~10× the KS20 curve in Fig 2g; the paper and site use Eq 24.
+- Fig 4 transition masses are reproduced to within roughly 0.5 dex.

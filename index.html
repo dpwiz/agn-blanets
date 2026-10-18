@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="An interactive model of the planets that may form in the dusty tori around supermassive black holes, after Mishra, Lyra, McKernan et al. 2026." />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <title>Blanets — planets of the AGN torus</title>
+  </head>
+  <body>
+    <canvas id="scene" aria-label="Three-dimensional view of the dusty torus around a supermassive black hole"></canvas>
+    <div id="labels" aria-hidden="true"></div>
+
+    <header class="masthead">
+      <h1 class="wordmark">Blanets</h1>
+      <p class="tagline">Planets of the AGN torus</p>
+      <button class="link-button" id="about-open" type="button">About the paper</button>
+    </header>
+
+    <aside class="panel panel-model" id="model-panel" aria-label="Model parameters"></aside>
+    <aside class="panel panel-dock" id="dock" aria-label="Tools"></aside>
+    <footer class="timebar" id="timebar"></footer>
+
+    <dialog class="intro" id="intro"></dialog>
+    <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

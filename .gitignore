@@ -1,0 +1,6 @@
+papers/
+.notes/
+tmp/
+node_modules/
+dist/
+.playwright-mcp/

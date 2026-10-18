@@ -1,0 +1,357 @@
+import { Color, Group, Vector3 } from "three";
+import type { Blanet } from "../physics/bodies";
+import { linkBudget, BANDS } from "../physics/comms";
+import { C_LIGHT, PC, YR } from "../physics/constants";
+import { orbitalPosition, orbitalPeriod, orbitPath } from "../physics/kepler";
+import { radialState } from "../physics/model";
+import type { Vec3 } from "../physics/vec";
+import { shipStateAt } from "../ship";
+import { smbhMassKg, store, type AppState } from "../state";
+import { createBodyLayer, pickNearest, type BodyLayer } from "./bodies";
+import { buildGasHaze, buildPlanetCloud, floorRadius, type CloudLayer } from "./cloud";
+import { LabelLayer, type LabelSpec } from "./labels";
+import { buildLocalDecor, type LocalDecor } from "./local";
+import { createMarker, PathLine, SegmentCloud } from "./overlays";
+import { PALETTE } from "./palette";
+import type { SceneContext } from "./scene";
+import { buildTorusDecor, type TorusDecor } from "./torus";
+import { LOCAL_PATCH_UNITS, localMap, torusMap, type ViewMap } from "./viewmap";
+
+export const TORUS_CAMERA = { position: new Vector3(0, 36, 112), target: new Vector3(0, -6, 0) };
+export const LOCAL_CAMERA = { position: new Vector3(0, 16, 24), target: new Vector3(0, 0, 0) };
+
+function lightTimeLabel(pc: number): string {
+  const years = (pc * PC) / (C_LIGHT * YR);
+  if (years < 1) return `${(years * 365.25).toFixed(0)} light-days`;
+  return `${years < 10 ? years.toFixed(1) : Math.round(years)} light-years`;
+}
+
+export class World {
+  private torusGroup = new Group();
+  private localGroup = new Group();
+  private overlayGroup = new Group();
+  private planets: CloudLayer | null = null;
+  private haze: CloudLayer | null = null;
+  private decor: TorusDecor | null = null;
+  private localDecor: LocalDecor | null = null;
+  private torusBodies: BodyLayer = createBodyLayer(7);
+  private localBodies: BodyLayer = createBodyLayer(7);
+  private labels: LabelLayer;
+  private selectedOrbit = new PathLine(PALETTE.bone, 0.45);
+  private preview = new PathLine(PALETTE.thrust, 0.9, true);
+  private shipPaths: PathLine[] = [];
+  private shipMarker = createMarker(PALETTE.thrust, 0.18);
+  private signalLine = new PathLine(PALETTE.signal, 0.9);
+  private network = new SegmentCloud();
+  private route = new PathLine(PALETTE.emberHot, 1);
+  private map: ViewMap;
+  private networkScene: Vector3[] = [];
+  private lastSignalEval = 0;
+  private signalOk = false;
+
+  constructor(private ctx: SceneContext, labelsRoot: HTMLElement) {
+    this.labels = new LabelLayer(labelsRoot);
+    ctx.scene.add(this.torusGroup, this.localGroup, this.overlayGroup);
+    this.torusGroup.add(this.torusBodies.points);
+    this.localGroup.add(this.localBodies.points);
+    this.overlayGroup.add(this.selectedOrbit.line, this.preview.line, this.shipMarker, this.signalLine.line, this.network.lines, this.route.line);
+    this.map = torusMap(floorRadius(store.state.params.rMinPc), store.state.zExaggeration);
+    this.rebuildPopulation(store.state);
+    this.rebuildLocal(store.state);
+    this.applyView(store.state, false);
+    store.subscribe((s, changed) => this.onChange(s, changed));
+    ctx.onFrame((dt) => this.frame(dt));
+    this.installPicking();
+  }
+
+  private onChange(s: AppState, changed: Set<keyof AppState>): void {
+    if (changed.has("population") || changed.has("colorBy")) this.rebuildPopulation(s);
+    if (changed.has("focus") || changed.has("population")) this.rebuildLocal(s);
+    if (changed.has("view")) this.applyView(s, true);
+    if (changed.has("zExaggeration")) {
+      this.planets?.setZExaggeration(s.zExaggeration);
+      this.haze?.setZExaggeration(s.zExaggeration);
+      this.localDecor?.setZExaggeration(s.zExaggeration);
+    }
+    if (changed.has("hopPreview")) {
+      if (s.hopPreview) this.preview.setPoints(s.hopPreview.points, s.hopPreview.times);
+      else this.preview.hide();
+    }
+    if (changed.has("ship")) this.rebuildShip(s);
+    if (changed.has("network") || changed.has("route") || changed.has("showNetwork")) this.rebuildNetwork(s);
+    if (changed.has("selected")) this.rebuildSelectedOrbit(s);
+    if (changed.has("origin") || changed.has("target") || changed.has("band") || changed.has("rig") || changed.has("tab")) this.lastSignalEval = 0;
+  }
+
+  private rebuildPopulation(s: AppState): void {
+    const mSmbh = smbhMassKg(s.params);
+    const rFloor = floorRadius(s.params.rMinPc);
+    for (const layer of [this.planets, this.haze]) {
+      if (layer) {
+        this.torusGroup.remove(layer.points);
+        layer.dispose();
+      }
+    }
+    if (this.decor) {
+      this.torusGroup.remove(this.decor.group);
+      this.decor.dispose();
+    }
+    this.decor = buildTorusDecor(s.population, s.params, rFloor);
+    this.haze = buildGasHaze(s.population, mSmbh, rFloor);
+    this.planets = buildPlanetCloud(s.population, s.impostors, mSmbh, rFloor, s.colorBy, s.params.agnLifetimeYr);
+    this.planets.setZExaggeration(s.zExaggeration);
+    this.haze.setZExaggeration(s.zExaggeration);
+    this.torusGroup.add(this.decor.group, this.haze.points, this.planets.points);
+    this.torusBodies.setBodies(this.withPinned(s.landmarks, s));
+  }
+
+  private rebuildLocal(s: AppState): void {
+    if (this.localDecor) {
+      this.localGroup.remove(this.localDecor.group);
+      this.localDecor.dispose();
+    }
+    this.localDecor = buildLocalDecor(radialState(s.focus.radius, s.params), s.focus.patchRadius);
+    this.localDecor.setZExaggeration(s.zExaggeration);
+    this.localGroup.add(this.localDecor.group);
+    this.localBodies.setBodies(this.withPinned(s.focus.blanets, s));
+  }
+
+  private withPinned(base: Blanet[], s: AppState): Blanet[] {
+    const ids = new Set(base.map((b) => b.id));
+    const extra = [s.selected, s.origin, s.target].filter((b): b is Blanet => !!b && !ids.has(b.id));
+    const unique = new Map(extra.map((b) => [b.id, b]));
+    return [...base, ...unique.values()];
+  }
+
+  private applyView(s: AppState, animate: boolean): void {
+    this.torusGroup.visible = s.view === "torus";
+    this.localGroup.visible = s.view === "local";
+    const cam = s.view === "torus" ? TORUS_CAMERA : LOCAL_CAMERA;
+    this.ctx.flyTo(cam.position, cam.target, animate ? 1.4 : 0);
+    this.rebuildSelectedOrbit(s);
+  }
+
+  private rebuildSelectedOrbit(s: AppState): void {
+    const b = s.selected;
+    if (!b) {
+      this.selectedOrbit.hide();
+      return;
+    }
+    const mSmbh = smbhMassKg(s.params);
+    if (s.view === "torus") {
+      this.selectedOrbit.setPoints(orbitPath(b.orbit, 192));
+    } else {
+      const period = orbitalPeriod(b.orbit.radius, mSmbh);
+      const t0 = s.timeYr * YR;
+      const times = Array.from({ length: 160 }, (_, i) => t0 + ((i - 120) / 160) * period * 0.25);
+      this.selectedOrbit.setPoints(times.map((t) => orbitalPosition(b.orbit, mSmbh, t)), times);
+    }
+  }
+
+  private rebuildShip(s: AppState): void {
+    for (const p of this.shipPaths) {
+      this.overlayGroup.remove(p.line);
+    }
+    this.shipPaths = [];
+    if (!s.ship) {
+      this.shipMarker.visible = false;
+      return;
+    }
+    for (const leg of s.ship.legs) {
+      const line = new PathLine(PALETTE.thrust, 0.75);
+      line.setPoints(leg.path, leg.pathTimes);
+      this.overlayGroup.add(line.line);
+      this.shipPaths.push(line);
+    }
+    this.shipMarker.visible = true;
+  }
+
+  private rebuildNetwork(s: AppState): void {
+    if (!s.network || !s.showNetwork) {
+      this.network.hide();
+    } else {
+      const maxCap = Math.max(...s.network.edges.map((e) => e.capacity), 1);
+      const colors = s.network.edges.map((e) => {
+        const u = Math.log10(e.capacity) / Math.log10(maxCap);
+        return new Color().copy(PALETTE.haze).lerp(PALETTE.signal, Math.min(Math.max(u, 0), 1)).multiplyScalar(0.35 + 0.65 * u);
+      });
+      this.network.setPairs(
+        s.network.edges.map((e) => [e.a, e.b]),
+        colors,
+      );
+    }
+    this.networkScene = s.networkPositions.map(() => new Vector3());
+    if (!s.route) this.route.hide();
+  }
+
+  private highlightMap(s: AppState): Map<number, Color> {
+    const h = new Map<number, Color>();
+    if (s.route) for (const i of s.route.nodes) h.set(s.networkPositions[i]?.id ?? -1, PALETTE.signal);
+    if (s.selected) h.set(s.selected.id, PALETTE.bone);
+    if (s.target) h.set(s.target.id, PALETTE.signal);
+    if (s.origin) h.set(s.origin.id, PALETTE.thrust);
+    return h;
+  }
+
+  private frame(dt: number): void {
+    const s = store.state;
+    if (s.playing) store.state.timeYr = s.timeYr + s.speedYrPerSec * dt;
+    const t = store.state.timeYr * YR;
+    const mSmbh = smbhMassKg(s.params);
+    this.map =
+      s.view === "torus"
+        ? torusMap(floorRadius(s.params.rMinPc), s.zExaggeration)
+        : localMap({ radius: s.focus.radius, phase: s.focus.phase, patchRadius: s.focus.patchRadius, mSmbh }, t, s.zExaggeration);
+    this.planets?.setTime(store.state.timeYr);
+    this.haze?.setTime(store.state.timeYr);
+    const highlight = this.highlightMap(s);
+    const layer = s.view === "torus" ? this.torusBodies : this.localBodies;
+    const wanted = this.withPinned(s.view === "torus" ? s.landmarks : s.focus.blanets, s);
+    if (wanted.length !== layer.bodies.length || wanted.some((b, i) => b !== layer.bodies[i])) layer.setBodies(wanted);
+    layer.update(this.map, t, mSmbh, highlight);
+
+    if (s.view === "local" && s.selected) this.rebuildSelectedOrbit(s);
+    this.selectedOrbit.update(this.map);
+    this.preview.update(this.map);
+    for (const p of this.shipPaths) p.update(this.map);
+    if (s.ship) {
+      const st = shipStateAt(s.ship, t, mSmbh);
+      this.map.toScene(st.position, this.shipMarker.position);
+    }
+
+    if (s.network && s.showNetwork) {
+      s.networkPositions.forEach((b, i) => this.map.toScene(orbitalPosition(b.orbit, mSmbh, t), this.networkScene[i] ?? (this.networkScene[i] = new Vector3())));
+      this.network.update(this.networkScene);
+      if (s.route) {
+        this.route.setPoints(s.route.nodes.map((i) => orbitalPosition(s.networkPositions[i].orbit, mSmbh, t)));
+        this.route.update(this.map);
+      }
+    }
+
+    this.updateSignalLine(s, t, mSmbh);
+    this.renderLabels(s, t, mSmbh);
+  }
+
+  private updateSignalLine(s: AppState, t: number, mSmbh: number): void {
+    if (s.tab !== "signal" || !s.origin || !s.target) {
+      this.signalLine.hide();
+      return;
+    }
+    const a = orbitalPosition(s.origin.orbit, mSmbh, t);
+    const b = orbitalPosition(s.target.orbit, mSmbh, t);
+    const now = performance.now();
+    if (now - this.lastSignalEval > 400) {
+      this.lastSignalEval = now;
+      const env = { table: s.table, mSmbh, agnLuminosity: s.params.irradiationLuminosity, innerDiskRadius: s.params.rMinPc * PC };
+      this.signalOk = linkBudget(a, b, BANDS[s.band], s.rig, env).capacity >= 1;
+      this.signalLine.setColor(this.signalOk ? PALETTE.signal : PALETTE.thrust);
+    }
+    const n = 48;
+    const pts: Vec3[] = Array.from({ length: n + 1 }, (_, i) => {
+      const u = i / n;
+      return [a[0] + u * (b[0] - a[0]), a[1] + u * (b[1] - a[1]), a[2] + u * (b[2] - a[2])];
+    });
+    this.signalLine.setPoints(pts);
+    this.signalLine.update(this.map);
+  }
+
+  private renderLabels(s: AppState, t: number, mSmbh: number): void {
+    const specs: LabelSpec[] = [];
+    if (s.view === "torus" && this.decor) {
+      for (const r of this.decor.rings) {
+        specs.push({
+          key: `ring-${r.radiusPc}`,
+          html: `${r.radiusPc >= 1 ? r.radiusPc : r.radiusPc.toString()} pc<small>${lightTimeLabel(r.radiusPc)}</small>`,
+          className: "ring",
+          position: r.anchor,
+        });
+      }
+    }
+    if (s.view === "local") {
+      const half = LOCAL_PATCH_UNITS * 0.95;
+      const across = 2 * s.focus.patchRadius;
+      specs.push(
+        { key: "dir-in", html: "toward the black hole", className: "ring", position: new Vector3(0, 0, half) },
+        { key: "dir-out", html: "away from the black hole", className: "ring", position: new Vector3(0, 0, -half) },
+        { key: "dir-pro", html: "orbital motion", className: "ring", position: new Vector3(half, 0, 0) },
+        {
+          key: "scale",
+          html: `${(s.focus.radius / PC).toPrecision(3)} pc out<small>patch ${(across / PC).toPrecision(2)} pc across, ${lightTimeLabel(across / PC)}</small>`,
+          className: "ring",
+          position: new Vector3(-half, 0, half),
+        },
+      );
+    }
+    const named: [Blanet | null, string][] = [
+      [s.origin, "origin"],
+      [s.target, "target"],
+      [s.selected, ""],
+    ];
+    const done = new Set<number>();
+    for (const [b, cls] of named) {
+      if (!b || done.has(b.id)) continue;
+      done.add(b.id);
+      specs.push({
+        key: `body-${b.id}`,
+        html: b.name,
+        className: `body ${cls}`,
+        position: this.map.toScene(orbitalPosition(b.orbit, mSmbh, t)),
+      });
+    }
+    if (s.ship) {
+      specs.push({ key: "ship", html: "Ship", className: "body origin", position: this.shipMarker.position.clone() });
+    }
+    this.labels.render(specs, (p) => this.ctx.project(p));
+  }
+
+  private installPicking(): void {
+    const canvas = this.ctx.canvas;
+    let down: { x: number; y: number } | null = null;
+    canvas.addEventListener("pointerdown", (e) => {
+      down = { x: e.clientX, y: e.clientY };
+    });
+    canvas.addEventListener("pointerup", (e) => {
+      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
+      down = null;
+      const s = store.state;
+      const layer = s.view === "torus" ? this.torusBodies : this.localBodies;
+      const hit = pickNearest(layer, (p) => this.ctx.project(p), e.clientX, e.clientY, 16);
+      if (!hit) return;
+      this.choose(hit);
+    });
+    const tooltip = document.getElementById("tooltip") as HTMLDivElement;
+    canvas.addEventListener("pointermove", (e) => {
+      const s = store.state;
+      const layer = s.view === "torus" ? this.torusBodies : this.localBodies;
+      const hit = pickNearest(layer, (p) => this.ctx.project(p), e.clientX, e.clientY, 14);
+      canvas.style.cursor = hit ? "pointer" : "crosshair";
+      if (!hit) {
+        tooltip.hidden = true;
+        return;
+      }
+      tooltip.hidden = false;
+      tooltip.innerHTML = `<strong>${hit.name}</strong><br>${(hit.orbit.radius / PC).toPrecision(3)} pc from the black hole`;
+      tooltip.style.left = `${e.clientX + 14}px`;
+      tooltip.style.top = `${e.clientY + 14}px`;
+    });
+    canvas.addEventListener("pointerleave", () => {
+      tooltip.hidden = true;
+    });
+  }
+
+  choose(b: Blanet): void {
+    const s = store.state;
+    if (s.tab === "hop" || s.tab === "signal") {
+      const slot = s.armedSlot ?? (!s.origin ? "origin" : !s.target ? "target" : null);
+      if (slot === "origin") {
+        store.set({ origin: b, armedSlot: s.target ? null : "target", hopPreview: null, route: null });
+        return;
+      }
+      if (slot === "target") {
+        store.set({ target: b, armedSlot: null, hopPreview: null, route: null });
+        return;
+      }
+    }
+    store.set({ selected: b });
+  }
+}
