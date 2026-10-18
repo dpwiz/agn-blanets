@@ -4,9 +4,9 @@ import { linkBudget, BANDS } from "../physics/comms";
 import { C_LIGHT, PC, YR } from "../physics/constants";
 import { orbitalPosition, orbitalPeriod, orbitPath } from "../physics/kepler";
 import { radialState } from "../physics/model";
-import type { Vec3 } from "../physics/vec";
+import { lerp, type Vec3 } from "../physics/vec";
 import { shipStateAt } from "../ship";
-import { smbhMassKg, store, type AppState } from "../state";
+import { commsEnvironment, smbhMassKg, store, type AppState } from "../state";
 import { createBodyLayer, pickNearest, type BodyLayer } from "./bodies";
 import { buildGasHaze, buildPlanetCloud, floorRadius, type CloudLayer } from "./cloud";
 import { LabelLayer, type LabelSpec } from "./labels";
@@ -65,7 +65,8 @@ export class World {
   }
 
   private onChange(s: AppState, changed: Set<keyof AppState>): void {
-    if (changed.has("population") || changed.has("colorBy")) this.rebuildPopulation(s);
+    if (changed.has("population")) this.rebuildPopulation(s);
+    else if (changed.has("colorBy")) this.rebuildPlanets(s);
     if (changed.has("focus") || changed.has("population")) this.rebuildLocal(s);
     if (changed.has("view")) this.applyView(s, true);
     if (changed.has("zExaggeration")) {
@@ -86,11 +87,9 @@ export class World {
   private rebuildPopulation(s: AppState): void {
     const mSmbh = smbhMassKg(s.params);
     const rFloor = floorRadius(s.params.rMinPc);
-    for (const layer of [this.planets, this.haze]) {
-      if (layer) {
-        this.torusGroup.remove(layer.points);
-        layer.dispose();
-      }
+    if (this.haze) {
+      this.torusGroup.remove(this.haze.points);
+      this.haze.dispose();
     }
     if (this.decor) {
       this.torusGroup.remove(this.decor.group);
@@ -98,11 +97,21 @@ export class World {
     }
     this.decor = buildTorusDecor(s.population, s.params, rFloor);
     this.haze = buildGasHaze(s.population, mSmbh, rFloor);
-    this.planets = buildPlanetCloud(s.population, s.impostors, mSmbh, rFloor, s.colorBy, s.params.agnLifetimeYr);
-    this.planets.setZExaggeration(s.zExaggeration);
     this.haze.setZExaggeration(s.zExaggeration);
-    this.torusGroup.add(this.decor.group, this.haze.points, this.planets.points);
+    this.torusGroup.add(this.decor.group, this.haze.points);
+    this.rebuildPlanets(s);
     this.torusBodies.setBodies(this.withPinned(s.landmarks, s));
+  }
+
+  private rebuildPlanets(s: AppState): void {
+    if (this.planets) {
+      this.torusGroup.remove(this.planets.points);
+      this.planets.dispose();
+    }
+    const mSmbh = smbhMassKg(s.params);
+    this.planets = buildPlanetCloud(s.population, s.impostors, mSmbh, floorRadius(s.params.rMinPc), s.colorBy, s.params.agnLifetimeYr);
+    this.planets.setZExaggeration(s.zExaggeration);
+    this.torusGroup.add(this.planets.points);
   }
 
   private rebuildLocal(s: AppState): void {
@@ -151,6 +160,7 @@ export class World {
   private rebuildShip(s: AppState): void {
     for (const p of this.shipPaths) {
       this.overlayGroup.remove(p.line);
+      p.dispose();
     }
     this.shipPaths = [];
     if (!s.ship) {
@@ -242,15 +252,11 @@ export class World {
     const now = performance.now();
     if (now - this.lastSignalEval > 400) {
       this.lastSignalEval = now;
-      const env = { table: s.table, mSmbh, agnLuminosity: s.params.irradiationLuminosity, innerDiskRadius: s.params.rMinPc * PC };
-      this.signalOk = linkBudget(a, b, BANDS[s.band], s.rig, env).capacity >= 1;
+      this.signalOk = linkBudget(a, b, BANDS[s.band], s.rig, commsEnvironment(s)).capacity >= 1;
       this.signalLine.setColor(this.signalOk ? PALETTE.signal : PALETTE.thrust);
     }
     const n = 48;
-    const pts: Vec3[] = Array.from({ length: n + 1 }, (_, i) => {
-      const u = i / n;
-      return [a[0] + u * (b[0] - a[0]), a[1] + u * (b[1] - a[1]), a[2] + u * (b[2] - a[2])];
-    });
+    const pts: Vec3[] = Array.from({ length: n + 1 }, (_, i) => lerp(a, b, i / n));
     this.signalLine.setPoints(pts);
     this.signalLine.update(this.map);
   }

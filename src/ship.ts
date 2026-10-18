@@ -4,7 +4,7 @@ import { G } from "./physics/constants";
 import { orbitalPosition, propagateKepler } from "./physics/kepler";
 import type { TorchFlight } from "./physics/torch";
 import { torchProgress } from "./physics/torch";
-import type { TransferLeg } from "./physics/transfer";
+import { rocketMassRatio, type TransferLeg } from "./physics/transfer";
 import { distance, lerp, norm, type Vec3 } from "./physics/vec";
 
 export interface ShipLeg {
@@ -53,7 +53,7 @@ export function orbitalShipLeg(from: Blanet, to: Blanet, leg: TransferLeg, mSmbh
     departTime: leg.departTime,
     arriveTime: leg.departTime + leg.timeOfFlight,
     dv: leg.dvTotal,
-    massRatio: Math.exp(leg.dvTotal / exhaustVelocity),
+    massRatio: rocketMassRatio(leg.dvTotal, exhaustVelocity),
     properTime: pathProper[pathProper.length - 1],
     path,
     pathTimes,

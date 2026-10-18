@@ -1,8 +1,8 @@
-import { BANDS, linkBudget, type BandId, type CommsEnvironment } from "../physics/comms";
-import { PC, YR } from "../physics/constants";
+import { BANDS, linkBudget, type BandId } from "../physics/comms";
+import { YR } from "../physics/constants";
 import { orbitalPosition } from "../physics/kepler";
 import { pairCoverage, shortestRoute, type NetworkGraph } from "../physics/network";
-import { smbhMassKg, store, type AppState } from "../state";
+import { commsEnvironment, smbhMassKg, store, type AppState } from "../state";
 import type { NetworkRequest } from "../workers/network.worker";
 import { dataRate, decibels, distanceWithLight, duration, sci } from "../format";
 import { h, readout, segmented, slider } from "./dom";
@@ -13,6 +13,7 @@ const RELAY_DELAY_S = 60;
 let minCapacity = 1e3;
 let autoRebuild = false;
 let requestId = 0;
+let requestedAtYr = 0;
 let lastAuto = 0;
 let busy = false;
 const worker = new Worker(new URL("../workers/network.worker.ts", import.meta.url), { type: "module" });
@@ -21,12 +22,12 @@ worker.onmessage = (e: MessageEvent<{ id: number; graph: NetworkGraph }>) => {
   busy = false;
   if (e.data.id !== requestId) return;
   const s = store.state;
-  store.set({ network: e.data.graph, networkBuiltAtYr: s.timeYr, showNetwork: true, route: routeFor(s, e.data.graph) });
+  store.set({ network: e.data.graph, networkBuiltAtYr: requestedAtYr, showNetwork: true, route: routeFor(s, e.data.graph) });
 };
 
-export function commsEnvironment(s: AppState): CommsEnvironment {
-  return { table: s.table, mSmbh: smbhMassKg(s.params), agnLuminosity: s.params.irradiationLuminosity, innerDiskRadius: s.params.rMinPc * PC };
-}
+store.subscribe((s, changed) => {
+  if (changed.has("network") && !s.network) requestId += 1;
+});
 
 function routeFor(s: AppState, graph: NetworkGraph | null) {
   if (!graph || !s.origin || !s.target) return null;
@@ -43,6 +44,7 @@ export function requestNetwork(s: AppState): void {
   const t = s.timeYr * YR;
   const positions = bodies.map((b) => orbitalPosition(b.orbit, mSmbh, t));
   requestId += 1;
+  requestedAtYr = s.timeYr;
   busy = true;
   store.set({ networkPositions: bodies });
   const msg: NetworkRequest = {
@@ -179,7 +181,9 @@ export function renderSignal(s: AppState): HTMLElement {
   return h("div", {}, ...parts);
 }
 
-export function refreshRoute(s: AppState): void {
+export function refreshRoute(s: AppState): boolean {
   const route = routeFor(s, s.network);
-  if (route !== s.route) store.set({ route });
+  if (route === s.route) return false;
+  store.set({ route });
+  return true;
 }

@@ -1,5 +1,5 @@
 import type { Blanet } from "../physics/bodies";
-import { circularOrbitClockRate } from "../physics/clocks";
+import { circularOrbitClockRate, clockLagPerYear } from "../physics/clocks";
 import { YR } from "../physics/constants";
 import { shipStateAt } from "../ship";
 import { smbhMassKg, store, type AppState } from "../state";
@@ -23,7 +23,7 @@ function rows(s: AppState): ClockRow[] {
     if (!b || seen.has(b.id)) return;
     seen.add(b.id);
     const rate = circularOrbitClockRate(b.orbit.radius, mSmbh);
-    out.push({ who: `${b.name}${role}`, elapsed: since * rate, note: `Loses ${duration((1 - rate) * YR)} per year` });
+    out.push({ who: `${b.name}${role}`, elapsed: since * rate, note: `Loses ${duration(clockLagPerYear(rate))} per year` });
   };
   add(s.selected, "");
   add(s.origin, ", origin");

@@ -69,19 +69,19 @@ function scatterMass(mass: number, rand: () => number): number {
   return mass * 10 ** (MASS_SCATTER_DEX * gaussian(rand));
 }
 
+export const IMPOSTOR_STRIDE = 4;
+
 export function sampleImpostorCloud(pop: PopulationSummary, count: number, seed: number): Float32Array {
   const rand = mulberry32(seed);
-  const out = new Float32Array(count * 5);
-  const regimeCode = { hill: 0, bondi: 1, geometric: 2 } as const;
+  const out = new Float32Array(count * IMPOSTOR_STRIDE);
   for (let i = 0; i < count; i++) {
     const bin = pickBin(pop, rand());
-    if (!bin) break;
-    const r = radiusInBin(bin, rand());
-    out[i * 5] = r;
-    out[i * 5 + 1] = rand() * 2 * Math.PI;
-    out[i * 5 + 2] = gaussian(rand) * bin.state.dust.dustScaleHeight;
-    out[i * 5 + 3] = scatterMass(bin.state.planetesimalMass, rand);
-    out[i * 5 + 4] = regimeCode[bin.state.accretion.regime];
+    if (!bin) return out.subarray(0, i * IMPOSTOR_STRIDE);
+    const o = i * IMPOSTOR_STRIDE;
+    out[o] = radiusInBin(bin, rand());
+    out[o + 1] = rand() * 2 * Math.PI;
+    out[o + 2] = gaussian(rand) * bin.state.dust.dustScaleHeight;
+    out[o + 3] = scatterMass(bin.state.planetesimalMass, rand);
   }
   return out;
 }

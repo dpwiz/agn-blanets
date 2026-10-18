@@ -1,4 +1,4 @@
-import { M_SUN, PC } from "../physics/constants";
+import { HYDROGEN_BURNING_MASS, PC } from "../physics/constants";
 import type { ModelParams } from "../physics/params";
 import { formationBands } from "../render/torus";
 import { count, mass, sci } from "../format";
@@ -179,7 +179,7 @@ function advanced(p: ModelParams, set: (patch: Partial<ModelParams>) => void, op
       (v) => set({ planetesimalLaw: v }),
       sourceGlyph("planetesimalLaw"),
     ),
-    h("p", { class: "axis-note", text: `Hydrogen burning starts near ${mass(0.075 * M_SUN)}; anything heavier born here is a stellar-mass ball of pure dust.` }),
+    h("p", { class: "axis-note", text: `Hydrogen burning starts near ${mass(HYDROGEN_BURNING_MASS)}; anything heavier born here is a stellar-mass ball of pure dust.` }),
   );
   return details;
 }

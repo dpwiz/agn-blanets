@@ -1,9 +1,18 @@
 import type { Blanet } from "../physics/bodies";
 import { C_LIGHT, G, YR } from "../physics/constants";
-import { orbitalPeriod, orbitalPosition, propagateKepler } from "../physics/kepler";
+import { meanMotion, orbitalPeriod, orbitalPosition, propagateKepler } from "../physics/kepler";
 import { torchIntercept, type TorchFlight } from "../physics/torch";
-import { hohmannTime, porkchop, surfaceEscapeSpeed, transferLeg, type Porkchop, type TransferLeg } from "../physics/transfer";
-import { distance } from "../physics/vec";
+import {
+  hohmannTime,
+  PARKING_ORBIT_FACTOR,
+  porkchop,
+  rocketMassRatio,
+  surfaceEscapeSpeed,
+  transferLeg,
+  type Porkchop,
+  type TransferLeg,
+} from "../physics/transfer";
+import { distance, lerp } from "../physics/vec";
 import { orbitalShipLeg, torchShipLeg, type Ship } from "../ship";
 import { smbhMassKg, store, type AppState } from "../state";
 import { duration, length, sci, speed } from "../format";
@@ -11,7 +20,8 @@ import { h, readout, segmented, slider } from "./dom";
 import { slots } from "./slots";
 
 interface PorkState {
-  key: string;
+  origin: Blanet;
+  target: Blanet;
   chart: Porkchop;
   pick: { i: number; j: number } | null;
 }
@@ -29,9 +39,8 @@ function departureFloor(s: AppState): number {
 
 function ensurePorkchop(s: AppState, origin: Blanet, target: Blanet, force = false): PorkState {
   const start = departureFloor(s);
-  const key = `${origin.id}-${target.id}-${s.params.mSmbhMsun}`;
   const stale = pork && pork.chart.departTimes[0] < start - 0.05 * (pork.chart.departTimes[pork.chart.departTimes.length - 1] - pork.chart.departTimes[0]);
-  if (pork && pork.key === key && !force && !stale) return pork;
+  if (pork && pork.origin === origin && pork.target === target && !force && !stale) return pork;
   const mSmbh = smbhMassKg(s.params);
   const th = hohmannTime(origin.orbit.radius, target.orbit.radius, mSmbh);
   const window = Math.min(orbitalPeriod(origin.orbit.radius, mSmbh), 6 * th);
@@ -44,7 +53,7 @@ function ensurePorkchop(s: AppState, origin: Blanet, target: Blanet, force = fal
       pick = { i: Math.floor(idx / chart.flightTimes.length), j: idx % chart.flightTimes.length };
     }
   });
-  pork = { key, chart, pick };
+  pork = { origin, target, chart, pick };
   return pork;
 }
 
@@ -127,14 +136,45 @@ function launch(s: AppState, leg: Ship["legs"][number]): void {
   pork = null;
 }
 
+function legDetails(s: AppState, leg: TransferLeg | null, origin: Blanet, target: Blanet): HTMLElement[] {
+  if (!leg) return [h("p", { class: "callout", text: "No transfer found in this window. Try recomputing later." })];
+  const mSmbh = smbhMassKg(s.params);
+  const now = s.timeYr * YR;
+  return [
+    readout([
+      ["Leave in", leg.departTime - now > YR ? duration(leg.departTime - now) : "now"],
+      ["Coast time", duration(leg.timeOfFlight), "big"],
+      ["Escape and capture Δv", speed(leg.dvTotal), "big"],
+      ["Speed relative to origin", speed(leg.vInfDepart)],
+      ["Speed relative to target", speed(leg.vInfArrive)],
+      ["Fuel-to-dry mass ratio", sci(rocketMassRatio(leg.dvTotal, s.orbitalExhaustKms * 1e3), 3)],
+      ["Hohmann reference", duration(hohmannTime(origin.orbit.radius, target.orbit.radius, mSmbh))],
+    ]),
+    h("p", {
+      class: "callout",
+      text: `While you coast, differential rotation reshuffles the neighbourhood about ${sci(leg.timeOfFlight / (2 / (3 * meanMotion(origin.orbit.radius, mSmbh))), 2)} times. A torchship arrives while today's neighbours are still close by.`,
+    }),
+  ];
+}
+
 function orbitalSection(s: AppState): (HTMLElement | null)[] {
   const origin = s.origin!;
   const target = s.target!;
   const mSmbh = smbhMassKg(s.params);
-  const p = ensurePorkchop(s, origin, target);
+  let p = ensurePorkchop(s, origin, target);
   const leg = pickedLeg(s, p);
+  const details = h("div", {}, ...legDetails(s, leg, origin, target));
+  const launchBtn = h("button", { class: "button", type: "button", text: "Launch this transfer" });
+  launchBtn.toggleAttribute("disabled", !leg);
   const canvas = h("canvas", { class: "porkchop", role: "img", "aria-label": "Porkchop plot of transfer cost against departure date and flight time" });
   requestAnimationFrame(() => drawPorkchop(canvas, p, s.timeYr * YR));
+  const show = (now: AppState) => {
+    const picked = pickedLeg(now, p);
+    drawPorkchop(canvas, p, now.timeYr * YR);
+    details.replaceChildren(...legDetails(now, picked, origin, target));
+    launchBtn.toggleAttribute("disabled", !picked);
+    previewOrbital(now, picked);
+  };
   canvas.addEventListener("click", (e) => {
     const g = JSON.parse(canvas.dataset.geom ?? "null");
     if (!g) return;
@@ -143,13 +183,9 @@ function orbitalSection(s: AppState): (HTMLElement | null)[] {
     const j = Math.floor((g.hgt - g.pad.b - (e.clientY - r.top)) / g.ch);
     if (i < 0 || j < 0 || i >= g.nI || j >= g.nJ) return;
     p.pick = { i, j };
-    previewOrbital(store.state, pickedLeg(store.state, p));
+    show(store.state);
   });
   if (!store.state.hopPreview && leg) queueMicrotask(() => previewOrbital(store.state, leg));
-  const exhaust = s.orbitalExhaustKms * 1e3;
-  const th = hohmannTime(origin.orbit.radius, target.orbit.radius, mSmbh);
-  const launchBtn = h("button", { class: "button", type: "button", text: "Launch this transfer" });
-  launchBtn.toggleAttribute("disabled", !leg);
   launchBtn.addEventListener("click", () => {
     const now = store.state;
     let fresh = pickedLeg(now, p);
@@ -158,29 +194,13 @@ function orbitalSection(s: AppState): (HTMLElement | null)[] {
   });
   const refresh = h("button", { class: "button quiet", type: "button", text: "Recompute from now" });
   refresh.addEventListener("click", () => {
-    ensurePorkchop(store.state, origin, target, true);
-    store.set({ hopPreview: null });
+    p = ensurePorkchop(store.state, origin, target, true);
+    show(store.state);
   });
   return [
     canvas,
     h("p", { class: "axis-note", text: "Brighter means cheaper. Click to choose a departure and flight time; the ring marks your pick. If the window slips into the past while time runs, launching takes the cheapest one still ahead." }),
-    leg
-      ? readout([
-          ["Leave in", leg.departTime - s.timeYr * YR > YR ? duration(leg.departTime - s.timeYr * YR) : "now"],
-          ["Coast time", duration(leg.timeOfFlight), "big"],
-          ["Escape and capture Δv", speed(leg.dvTotal), "big"],
-          ["Speed relative to origin", speed(leg.vInfDepart)],
-          ["Speed relative to target", speed(leg.vInfArrive)],
-          ["Fuel-to-dry mass ratio", sci(Math.exp(leg.dvTotal / exhaust), 3)],
-          ["Hohmann reference", duration(th)],
-        ])
-      : h("p", { class: "callout", text: "No transfer found in this window. Try recomputing later." }),
-    leg
-      ? h("p", {
-          class: "callout",
-          text: `While you coast, differential rotation reshuffles the neighbourhood about ${sci(leg.timeOfFlight / (2 / (3 * Math.sqrt((G * mSmbh) / origin.orbit.radius ** 3))), 2)} times. A torchship arrives while today's neighbours are still close by.`,
-        })
-      : null,
+    details,
     slider({
       label: "Exhaust speed",
       min: 3,
@@ -194,7 +214,7 @@ function orbitalSection(s: AppState): (HTMLElement | null)[] {
     h(
       "p",
       { class: "axis-note" },
-      `Escape from ${origin.name} alone costs ${speed(surfaceEscapeSpeed({ id: 0, orbit: origin.orbit, mass: origin.mass, radius: origin.radius }))} from its surface; Δv here assumes you start and end in a parking orbit at ${(1.5).toFixed(1)} radii.`,
+      `Escape from ${origin.name} alone costs ${speed(surfaceEscapeSpeed(origin))} from its surface; Δv here assumes you start and end in a parking orbit at ${PARKING_ORBIT_FACTOR.toFixed(1)} radii.`,
     ),
     h("div", { class: "button-row" }, launchBtn, refresh),
   ];
@@ -208,10 +228,7 @@ function torchSection(s: AppState): (HTMLElement | null)[] {
   const flight: TorchFlight = torchIntercept(origin.orbit, target.orbit, mSmbh, departureFloor(s), a, s.exhaustFractionC * C_LIGHT);
   const steps = 32;
   queueMicrotask(() => {
-    const pts = Array.from({ length: steps + 1 }, (_, i) => {
-      const u = i / steps;
-      return [flight.from[0] + u * (flight.to[0] - flight.from[0]), flight.from[1] + u * (flight.to[1] - flight.from[1]), flight.from[2] + u * (flight.to[2] - flight.from[2])] as [number, number, number];
-    });
+    const pts = Array.from({ length: steps + 1 }, (_, i) => lerp(flight.from, flight.to, i / steps));
     store.set({ hopPreview: { points: pts, times: pts.map((_, i) => flight.departTime + (flight.coordinateTime * i) / steps), kind: "torch" } });
   });
   const launchBtn = h("button", { class: "button", type: "button", text: "Light the torch" });

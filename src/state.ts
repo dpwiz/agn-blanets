@@ -1,8 +1,9 @@
 import { finalizeBlanets, sampleFocusCloud, sampleImpostorCloud, sampleLandmarks, type Blanet } from "./physics/bodies";
-import type { BandId, Transceiver } from "./physics/comms";
+import type { BandId, CommsEnvironment, Transceiver } from "./physics/comms";
 import { DEFAULT_RIG } from "./physics/comms";
+import { smbhMass } from "./physics/disk";
 import { buildDiskTable, type DiskTable } from "./physics/disktable";
-import { M_SUN, PC, YR } from "./physics/constants";
+import { PC, YR } from "./physics/constants";
 import { meanMotion } from "./physics/kepler";
 import type { NetworkGraph, Route } from "./physics/network";
 import { DEFAULT_PARAMS, type ModelParams } from "./physics/params";
@@ -66,8 +67,10 @@ const IMPOSTOR_COUNT = 90_000;
 const LANDMARK_COUNT = 48;
 const FOCUS_COUNT = 320;
 
-export function smbhMassKg(p: ModelParams): number {
-  return p.mSmbhMsun * M_SUN;
+export const smbhMassKg = smbhMass;
+
+export function commsEnvironment(s: AppState): CommsEnvironment {
+  return { table: s.table, mSmbh: smbhMass(s.params), agnLuminosity: s.params.irradiationLuminosity, innerDiskRadius: s.params.rMinPc * PC };
 }
 
 export function derivePopulation(params: ModelParams) {

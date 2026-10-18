@@ -1,14 +1,15 @@
 import { blanetDetails, MASS_SCATTER_DEX } from "../physics/bodies";
-import { circularOrbitClockRate } from "../physics/clocks";
-import { C_LIGHT, G, PC, YR } from "../physics/constants";
+import { circularOrbitClockRate, clockLagPerYear } from "../physics/clocks";
+import { C_LIGHT, PC, YR } from "../physics/constants";
 import { CLASS_LABEL, FATE_LABEL } from "../physics/fate";
-import { orbitalPeriod, orbitalPosition } from "../physics/kepler";
+import { meanMotion, orbitalPeriod, orbitalPosition } from "../physics/kepler";
+import { surfaceEscapeSpeed } from "../physics/transfer";
 import { deriveFocus, smbhMassKg, store, type AppState } from "../state";
 import { distanceWithLight, duration, length, mass, sci, speed } from "../format";
 import { h, readout } from "./dom";
 
 export function shearNote(s: AppState): HTMLElement {
-  const omega = Math.sqrt((G * smbhMassKg(s.params)) / s.focus.radius ** 3);
+  const omega = meanMotion(s.focus.radius, smbhMassKg(s.params));
   return h("p", {
     class: "axis-note",
     text: `Neighbours drift apart at ${speed(1.5 * omega * s.focus.patchRadius)} across this patch: differential rotation reshuffles it every ~${duration(2 / (3 * omega))}. Gather a fresh crowd to see who is close right now.`,
@@ -54,7 +55,7 @@ export function renderExplore(s: AppState): HTMLElement {
   const mSmbh = smbhMassKg(s.params);
   const d = blanetDetails(b, s.params);
   const rate = circularOrbitClockRate(b.orbit.radius, mSmbh);
-  const escape = Math.sqrt((2 * G * b.mass) / b.radius);
+  const escape = surfaceEscapeSpeed(b);
   const growing = d.fate.fate !== "frozen";
 
   const visit = h("button", { class: "button", type: "button", text: "Visit its neighbourhood" });
@@ -96,7 +97,7 @@ export function renderExplore(s: AppState): HTMLElement {
     ]),
     h("h3", { text: "Its clock" }),
     readout([
-      ["Runs slow by", `${duration((1 - rate) * YR)} per year`],
+      ["Runs slow by", `${duration(clockLagPerYear(rate))} per year`],
       ["Light from the hole takes", duration(b.orbit.radius / C_LIGHT)],
     ]),
     h("p", {

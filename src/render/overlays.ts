@@ -2,7 +2,6 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
-  Group,
   Line,
   LineBasicMaterial,
   LineDashedMaterial,
@@ -64,6 +63,11 @@ export class PathLine {
   setColor(color: Color): void {
     (this.line.material as LineBasicMaterial | LineDashedMaterial).color.copy(color);
   }
+
+  dispose(): void {
+    this.geometry.dispose();
+    (this.line.material as LineBasicMaterial | LineDashedMaterial).dispose();
+  }
 }
 
 export class SegmentCloud {
@@ -115,10 +119,4 @@ export function createMarker(color: Color, radius: number): Mesh {
   const m = new Mesh(new SphereGeometry(radius, 16, 12), new MeshBasicMaterial({ color }));
   m.visible = false;
   return m;
-}
-
-export function overlayGroup(...objects: (Line | LineSegments | Mesh)[]): Group {
-  const g = new Group();
-  for (const o of objects) g.add(o);
-  return g;
 }

@@ -7,6 +7,7 @@ import {
   Points,
   ShaderMaterial,
 } from "three";
+import { IMPOSTOR_STRIDE } from "../physics/bodies";
 import { M_JUP, PC, YR } from "../physics/constants";
 import { fateOf } from "../physics/fate";
 import { meanMotion } from "../physics/kepler";
@@ -109,7 +110,7 @@ export function buildPlanetCloud(
   colorBy: ColorBy,
   agnLifetimeYr: number,
 ): CloudLayer {
-  const count = impostors.length / 5;
+  const count = impostors.length / IMPOSTOR_STRIDE;
   const radius = new Float32Array(count);
   const phase = new Float32Array(count);
   const motion = new Float32Array(count);
@@ -119,12 +120,13 @@ export function buildPlanetCloud(
   const binOf = binIndexer(pop);
   const c = new Color();
   for (let i = 0; i < count; i++) {
-    const r = impostors[i * 5];
-    const m = impostors[i * 5 + 3];
+    const o = i * IMPOSTOR_STRIDE;
+    const r = impostors[o];
+    const m = impostors[o + 3];
     radius[i] = torusRadius(r, rFloor);
-    phase[i] = impostors[i * 5 + 1];
+    phase[i] = impostors[o + 1];
     motion[i] = meanMotion(r, mSmbh) * YR;
-    height[i] = impostors[i * 5 + 2] / r;
+    height[i] = impostors[o + 2] / r;
     const logM = Math.log10(m / M_JUP);
     size[i] = 0.9 + 0.22 * Math.max(logM + 1, 0);
     const state = pop.bins[binOf(r)].state;

@@ -61,7 +61,7 @@ export function mountDock(root: HTMLElement, onFrame: (hook: (dt: number) => voi
   renderBody(store.state);
   store.subscribe((s, changed) => {
     if (changed.has("tab")) renderTabs(s);
-    if (changed.has("origin") || changed.has("target")) refreshRoute(s);
+    if ((changed.has("origin") || changed.has("target")) && refreshRoute(s)) return;
     if (RERENDER_ON.some((k) => changed.has(k))) renderBody(s);
   });
 

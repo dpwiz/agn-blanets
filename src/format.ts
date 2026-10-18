@@ -17,7 +17,7 @@ const SUPERSCRIPT: Record<string, string> = {
 export function sci(x: number, digits = 2): string {
   if (!Number.isFinite(x)) return x > 0 ? "∞" : "—";
   if (x === 0) return "0";
-  const exp = Math.floor(Math.log10(Math.abs(x)));
+  const exp = Math.floor(Math.log10(Math.abs(Number(x.toPrecision(digits)))));
   if (exp >= -2 && exp < 4) {
     const decimals = Math.max(0, digits - 1 - exp);
     return x.toLocaleString("en-US", { maximumFractionDigits: decimals, minimumFractionDigits: 0 });
