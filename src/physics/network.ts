@@ -1,4 +1,4 @@
-import { agnSightlineDepth, BANDS, linkBudget, opticalDepth, type BandId, type CommsEnvironment, type Transceiver } from "./comms";
+import { agnSightlineDepth, BANDS, linkBudget, pathDepth, type BandId, type CommsEnvironment, type Transceiver } from "./comms";
 import type { Vec3 } from "./vec";
 
 export interface NetworkEdge {
@@ -34,7 +34,7 @@ export function buildNetwork(positions: Vec3[], env: CommsEnvironment, opts: Net
       const b = positions[j];
       const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
       if (d > opts.maxRange) continue;
-      const path = opticalDepth(a, b, band, env.table);
+      const path = pathDepth(a, b, band, env);
       const forward = linkBudget(a, b, band, opts.rig, env, { path, receiverToAgn: agnDepth[j] });
       if (forward.capacity < opts.minCapacity) continue;
       const backward = linkBudget(b, a, band, opts.rig, env, { path, receiverToAgn: agnDepth[i] });

@@ -44,6 +44,7 @@ export interface CommsEnvironment {
   mSmbh: number;
   agnLuminosity: number;
   innerDiskRadius: number;
+  gasFraction: number;
 }
 
 export type Occultation = "none" | "horizon" | "innerDisk";
@@ -123,13 +124,21 @@ export function opticalDepth(a: Vec3, b: Vec3, band: Band, table: DiskTable): { 
   return { dust, gas };
 }
 
+const CLEAR_PATH = { dust: 0, gas: 0 };
+
+export function pathDepth(a: Vec3, b: Vec3, band: Band, env: CommsEnvironment): { dust: number; gas: number } {
+  if (env.gasFraction <= 0) return CLEAR_PATH;
+  const full = opticalDepth(a, b, band, env.table);
+  return env.gasFraction >= 1 ? full : { dust: full.dust * env.gasFraction, gas: full.gas * env.gasFraction };
+}
+
 export function apertureGain(rig: Transceiver, wavelength: number): number {
   return rig.apertureEfficiency * ((Math.PI * rig.apertureDiameter) / wavelength) ** 2;
 }
 
 export function agnSightlineDepth(receiver: Vec3, band: Band, env: CommsEnvironment): number {
   const inner = scale(receiver, (env.innerDiskRadius * 0.5) / Math.max(norm(receiver), 1));
-  const d = opticalDepth(receiver, inner, band, env.table);
+  const d = pathDepth(receiver, inner, band, env);
   return d.dust + d.gas;
 }
 
@@ -150,7 +159,7 @@ export function linkBudget(
   const lightDelay = d / C_LIGHT;
   const shapiro = shapiroDelay(a, b, env.mSmbh);
   const occ = occultation(a, b, env);
-  const depth = pre.path ?? opticalDepth(a, b, band, env.table);
+  const depth = pre.path ?? pathDepth(a, b, band, env);
   const tau = depth.dust + depth.gas;
   const tauToAgn = pre.receiverToAgn ?? agnSightlineDepth(b, band, env);
   const lambda = band.wavelength;

@@ -2,7 +2,7 @@ import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Points, Shade
 import type { Blanet } from "../physics/bodies";
 import { M_JUP } from "../physics/constants";
 import { orbitalPosition } from "../physics/kepler";
-import { massColor } from "./palette";
+import { massColor, REMNANT_COLOR } from "./palette";
 import type { ViewMap } from "./viewmap";
 
 const vertexShader = `
@@ -37,13 +37,24 @@ const fragmentShader = `
   }
 `;
 
+export interface BodyLook {
+  mass: number;
+  hidden: boolean;
+  remnant: boolean;
+}
+
+export type LookUp = (b: Blanet) => BodyLook;
+
+export const BIRTH_LOOK: LookUp = (b) => ({ mass: b.mass, hidden: false, remnant: false });
+
 export interface BodyLayer {
   points: Points;
   bodies: Blanet[];
+  hidden: Uint8Array;
   screen: Float32Array;
   scenePositions: Vector3[];
   setBodies(bodies: Blanet[]): void;
-  update(map: ViewMap, tSeconds: number, mSmbh: number, highlight: Map<number, Color>): void;
+  update(map: ViewMap, tSeconds: number, mSmbh: number, highlight: Map<number, Color>, look?: LookUp): void;
 }
 
 export function createBodyLayer(baseSize: number): BodyLayer {
@@ -61,6 +72,7 @@ export function createBodyLayer(baseSize: number): BodyLayer {
   const layer: BodyLayer = {
     points,
     bodies: [],
+    hidden: new Uint8Array(0),
     screen: new Float32Array(0),
     scenePositions: [],
     setBodies(bodies) {
@@ -71,9 +83,10 @@ export function createBodyLayer(baseSize: number): BodyLayer {
       geometry.setAttribute("aColor", new BufferAttribute(new Float32Array(n * 3), 3));
       geometry.setAttribute("aRing", new BufferAttribute(new Float32Array(n), 1));
       layer.scenePositions = bodies.map(() => new Vector3());
+      layer.hidden = new Uint8Array(n);
       layer.screen = new Float32Array(n * 2);
     },
-    update(map, tSeconds, mSmbh, highlight) {
+    update(map, tSeconds, mSmbh, highlight, look = BIRTH_LOOK) {
       const pos = geometry.getAttribute("position") as BufferAttribute;
       const size = geometry.getAttribute("aSize") as BufferAttribute;
       const color = geometry.getAttribute("aColor") as BufferAttribute;
@@ -84,10 +97,15 @@ export function createBodyLayer(baseSize: number): BodyLayer {
         const v = map.toScene(orbitalPosition(b.orbit, mSmbh, tSeconds), layer.scenePositions[i]);
         pos.setXYZ(i, v.x, v.y, v.z);
         const h = highlight.get(b.id);
+        const seen = look(b);
+        const logM = Math.log10(seen.mass / M_JUP);
+        layer.hidden[i] = seen.hidden && !h ? 1 : 0;
         if (h) c.copy(h);
-        else massColor(Math.log10(b.mass / M_JUP), c);
+        else if (seen.remnant) c.copy(REMNANT_COLOR);
+        else massColor(logM, c);
         color.setXYZ(i, c.r, c.g, c.b);
-        size.setX(i, (baseSize + 2.2 * Math.max(Math.log10(b.mass / M_JUP), 0)) * (h ? 2.1 : 1));
+        const base = seen.remnant ? baseSize * 0.7 : baseSize + 2.2 * Math.max(logM, 0);
+        size.setX(i, layer.hidden[i] ? 0 : base * (h ? 2.1 : 1));
         ring.setX(i, h ? 1 : 0);
       });
       pos.needsUpdate = true;
@@ -109,6 +127,7 @@ export function pickNearest(
   let best: Blanet | null = null;
   let bestD = radiusPx * radiusPx;
   layer.scenePositions.forEach((p, i) => {
+    if (layer.hidden[i]) return;
     const s = project(p);
     if (!s.visible) return;
     const d = (s.x - x) ** 2 + (s.y - y) ** 2;

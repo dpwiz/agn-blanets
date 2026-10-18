@@ -29,6 +29,7 @@ export interface ScaleRing {
 export interface TorusDecor {
   group: Group;
   rings: ScaleRing[];
+  setShining(fraction: number): void;
   dispose(): void;
 }
 
@@ -50,7 +51,7 @@ const accretionDiskMaterial = () =>
     depthWrite: false,
     side: DoubleSide,
     blending: AdditiveBlending,
-    uniforms: { uInner: { value: 0.7 }, uOuter: { value: 4 } },
+    uniforms: { uInner: { value: 0.7 }, uOuter: { value: 4 }, uGlow: { value: 1 } },
     vertexShader: `
       varying vec3 vPos;
       void main() {
@@ -61,6 +62,7 @@ const accretionDiskMaterial = () =>
     fragmentShader: `
       uniform float uInner;
       uniform float uOuter;
+      uniform float uGlow;
       varying vec3 vPos;
       void main() {
         float r = length(vPos.xy);
@@ -68,7 +70,7 @@ const accretionDiskMaterial = () =>
         vec3 hot = vec3(0.92, 0.9, 1.0);
         vec3 warm = vec3(0.9, 0.54, 0.31);
         vec3 c = mix(hot, warm, pow(u, 0.35));
-        float a = 0.55 * exp(-6.0 * u) * (1.0 - u);
+        float a = 0.55 * exp(-6.0 * u) * (1.0 - u) * uGlow;
         gl_FragColor = vec4(c, a);
       }
     `,
@@ -80,10 +82,8 @@ export function buildTorusDecor(pop: PopulationSummary, p: ModelParams, rFloor: 
 
   const hole = new Mesh(new SphereGeometry(0.55, 32, 16), new MeshBasicMaterial({ color: 0x000000 }));
   group.add(hole);
-  const photonRing = new Mesh(
-    new RingGeometry(0.58, 0.66, 64),
-    new MeshBasicMaterial({ color: PALETTE.emberHot, transparent: true, opacity: 0.9, side: DoubleSide, blending: AdditiveBlending }),
-  );
+  const photonRingMaterial = new MeshBasicMaterial({ color: PALETTE.emberHot, transparent: true, opacity: 0.9, side: DoubleSide, blending: AdditiveBlending });
+  const photonRing = new Mesh(new RingGeometry(0.58, 0.66, 64), photonRingMaterial);
   photonRing.rotation.x = -Math.PI / 2 + 0.25;
   group.add(photonRing);
   const diskMat = accretionDiskMaterial();
@@ -118,6 +118,10 @@ export function buildTorusDecor(pop: PopulationSummary, p: ModelParams, rFloor: 
   return {
     group,
     rings,
+    setShining(fraction) {
+      diskMat.uniforms.uGlow.value = fraction;
+      photonRingMaterial.opacity = 0.15 + 0.75 * fraction;
+    },
     dispose() {
       group.traverse((o) => {
         const m = o as Mesh;

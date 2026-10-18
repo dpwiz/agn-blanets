@@ -1,10 +1,17 @@
 import { store, type AppState, type ColorBy, type ViewMode } from "../state";
 import { simTime, sci } from "../format";
-import { cssColor, FATE_COLOR, massColor, REGIME_COLOR } from "../render/palette";
+import { cssColor, FATE_COLOR, massColor, REGIME_COLOR, REMNANT_COLOR } from "../render/palette";
 import { FATE_LABEL } from "../physics/fate";
 import { h, segmented } from "./dom";
+import { eraRow } from "./era";
 
-function legend(colorBy: ColorBy): HTMLElement {
+function legend(colorBy: ColorBy, eraMode: boolean): HTMLElement {
+  const items = legendItems(colorBy);
+  if (eraMode) items.append(h("span", {}, h("i", { style: `background:${cssColor(REMNANT_COLOR)}` }), "Dead star"));
+  return items;
+}
+
+function legendItems(colorBy: ColorBy): HTMLElement {
   const item = (color: string, label: string) => h("span", {}, h("i", { style: `background:${color}` }), label);
   if (colorBy === "regime") {
     return h("div", { class: "legend" }, item(cssColor(REGIME_COLOR.hill), "Hill"), item(cssColor(REGIME_COLOR.bondi), "Bondi"), item(cssColor(REGIME_COLOR.geometric), "Geometric"));
@@ -51,7 +58,7 @@ export function mountTimebar(root: HTMLElement, onFrame: (hook: (dt: number) => 
   const render = (s: AppState) => {
     play.textContent = s.playing ? "❚❚" : "▶";
     play.setAttribute("aria-label", s.playing ? "Pause time" : "Run time");
-    legendSlot.replaceChildren(legend(s.colorBy));
+    legendSlot.replaceChildren(legend(s.colorBy, s.eraMode));
     colorSelect.value = s.colorBy;
   };
 
@@ -69,7 +76,7 @@ export function mountTimebar(root: HTMLElement, onFrame: (hook: (dt: number) => 
   const colorSelect = h(
     "select",
     { "aria-label": "Colour bodies by" },
-    h("option", { value: "mass", text: "Colour by birth mass" }),
+    h("option", { value: "mass", text: "Colour by mass" }),
     h("option", { value: "regime", text: "Colour by accretion regime" }),
     h("option", { value: "fate", text: "Colour by likely fate" }),
   );
@@ -82,10 +89,16 @@ export function mountTimebar(root: HTMLElement, onFrame: (hook: (dt: number) => 
       const on = !document.body.classList.contains(cls);
       document.body.classList.remove("show-model", "show-dock");
       if (on) document.body.classList.add(cls);
-      for (const other of mobileSwitch.querySelectorAll("button")) other.setAttribute("aria-pressed", String(other === b && on));
+      for (const other of mobileSwitch.querySelectorAll("button")) if (other !== eraToggle) other.setAttribute("aria-pressed", String(other === b && on));
     });
     mobileSwitch.append(b);
   }
+  const eraToggle = h("button", { type: "button", "aria-pressed": "false", text: "Era" });
+  eraToggle.addEventListener("click", () => {
+    const on = document.body.classList.toggle("show-era");
+    eraToggle.setAttribute("aria-pressed", String(on));
+  });
+  mobileSwitch.append(eraToggle);
   new ResizeObserver(() => {
     document.documentElement.style.setProperty("--timebar-h", `${root.offsetHeight}px`);
   }).observe(root);
@@ -100,10 +113,11 @@ export function mountTimebar(root: HTMLElement, onFrame: (hook: (dt: number) => 
     h("label", { class: "group" }, h("span", { text: "Vertical stretch" }), stretch),
     h("div", { class: "spacer" }),
     legendSlot,
+    eraRow(onFrame),
   );
   render(store.state);
   store.subscribe((s, changed) => {
-    if (changed.has("playing") || changed.has("colorBy")) render(s);
+    if (changed.has("playing") || changed.has("colorBy") || changed.has("eraMode")) render(s);
     if (changed.has("speedYrPerSec")) {
       speedInput.value = String(Math.log10(s.speedYrPerSec));
       updateSpeedLabel();

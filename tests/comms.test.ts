@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { G, C_LIGHT, M_SUN, PC } from "../src/physics/constants";
-import { BANDS, DEFAULT_RIG, dustOpacity, linkBudget, opticalDepth, shapiroDelay, type CommsEnvironment } from "../src/physics/comms";
+import { BANDS, DEFAULT_RIG, dustOpacity, linkBudget, opticalDepth, pathDepth, shapiroDelay, type CommsEnvironment } from "../src/physics/comms";
 import { buildDiskTable, type DiskTable } from "../src/physics/disktable";
 import { DEFAULT_PARAMS } from "../src/physics/params";
 import { buildNetwork, pairCoverage, shortestRoute } from "../src/physics/network";
@@ -56,7 +56,7 @@ describe("optical depth", () => {
 
 describe("links through the model torus", () => {
   const table = buildDiskTable(DEFAULT_PARAMS);
-  const env: CommsEnvironment = { table, mSmbh: M, agnLuminosity: DEFAULT_PARAMS.irradiationLuminosity, innerDiskRadius: 0.1 * PC };
+  const env: CommsEnvironment = { table, mSmbh: M, agnLuminosity: DEFAULT_PARAMS.irradiationLuminosity, innerDiskRadius: 0.1 * PC, gasFraction: 1 };
   it("long-wavelength radio penetrates the dust layer far better than a laser", () => {
     const a: Vec3 = [1 * PC, 0, 0];
     const b: Vec3 = [1.01 * PC, 0.005 * PC, 0];
@@ -84,5 +84,17 @@ describe("clocks", () => {
     const lag = (1 - circularOrbitClockRate(PC, M)) * 3.15576e7;
     expect(lag / 60).toBeGreaterThan(2);
     expect(lag / 60).toBeLessThan(10);
+  });
+});
+
+describe("gas clearing", () => {
+  it("scales the optical depth with the gas that remains", () => {
+    const table = buildDiskTable(DEFAULT_PARAMS);
+    const env = (gasFraction: number): CommsEnvironment => ({ table, mSmbh: M, agnLuminosity: 0, innerDiskRadius: 0.1 * PC, gasFraction });
+    const a: [number, number, number] = [1 * PC, 0, 0];
+    const b: [number, number, number] = [1.03 * PC, 0.01 * PC, 0];
+    const full = pathDepth(a, b, BANDS.laser, env(1));
+    expect(pathDepth(a, b, BANDS.laser, env(0.25)).dust / full.dust).toBeCloseTo(0.25, 10);
+    expect(pathDepth(a, b, BANDS.laser, env(0)).dust).toBe(0);
   });
 });

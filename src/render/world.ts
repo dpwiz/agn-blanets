@@ -1,13 +1,15 @@
 import { Color, Group, Vector3 } from "three";
-import type { Blanet } from "../physics/bodies";
+import { blanetTrack, type Blanet } from "../physics/bodies";
 import { linkBudget, BANDS } from "../physics/comms";
 import { C_LIGHT, PC, YR } from "../physics/constants";
 import { orbitalPosition, orbitalPeriod, orbitPath } from "../physics/kepler";
 import { radialState } from "../physics/model";
+import { EPOCH_MAX_YR, epochState, gasRemaining } from "../physics/era";
 import { lerp, type Vec3 } from "../physics/vec";
 import { shipStateAt } from "../ship";
-import { commsEnvironment, smbhMassKg, store, type AppState } from "../state";
-import { createBodyLayer, pickNearest, type BodyLayer } from "./bodies";
+import { agnDarkNow, commsEnvironment, smbhMassKg, store, type AppState } from "../state";
+import { BIRTH_LOOK, createBodyLayer, pickNearest, type BodyLayer, type LookUp } from "./bodies";
+import { fatePaint, MidplaneOverlay, stagePaint, temperaturePaint } from "./midplane";
 import { buildGasHaze, buildPlanetCloud, floorRadius, type CloudLayer } from "./cloud";
 import { LabelLayer, type LabelSpec } from "./labels";
 import { buildLocalDecor, type LocalDecor } from "./local";
@@ -19,6 +21,8 @@ import { LOCAL_PATCH_UNITS, localMap, torusMap, type ViewMap } from "./viewmap";
 
 export const TORUS_CAMERA = { position: new Vector3(0, 36, 112), target: new Vector3(0, -6, 0) };
 export const LOCAL_CAMERA = { position: new Vector3(0, 16, 24), target: new Vector3(0, 0, 0) };
+export const SWEEP_DECADES_PER_SECOND = 0.5;
+const STAGE_REPAINT_MS = 100;
 
 function lightTimeLabel(pc: number): string {
   const years = (pc * PC) / (C_LIGHT * YR);
@@ -33,6 +37,10 @@ export class World {
   private planets: CloudLayer | null = null;
   private haze: CloudLayer | null = null;
   private decor: TorusDecor | null = null;
+  private midplane: MidplaneOverlay | null = null;
+  private paintedKey = "";
+  private paintedAt = 0;
+  private skyKey = "";
   private localDecor: LocalDecor | null = null;
   private torusBodies: BodyLayer = createBodyLayer(7);
   private localBodies: BodyLayer = createBodyLayer(7);
@@ -67,6 +75,7 @@ export class World {
   private onChange(s: AppState, changed: Set<keyof AppState>): void {
     if (changed.has("population")) this.rebuildPopulation(s);
     else if (changed.has("colorBy")) this.rebuildPlanets(s);
+    if (changed.has("population") || changed.has("overlay") || changed.has("eraMode") || changed.has("eraYr")) this.paintOverlay(s, true);
     if (changed.has("focus") || changed.has("population")) this.rebuildLocal(s);
     if (changed.has("view")) this.applyView(s, true);
     if (changed.has("zExaggeration")) {
@@ -95,6 +104,13 @@ export class World {
       this.torusGroup.remove(this.decor.group);
       this.decor.dispose();
     }
+    if (this.midplane) {
+      this.torusGroup.remove(this.midplane.group);
+      this.midplane.dispose();
+    }
+    this.midplane = new MidplaneOverlay(s.params.rMinPc * PC, s.params.rMaxPc * PC, rFloor, s.population.bins.length);
+    this.torusGroup.add(this.midplane.group);
+    this.paintedKey = "";
     this.decor = buildTorusDecor(s.population, s.params, rFloor);
     this.haze = buildGasHaze(s.population, mSmbh, rFloor);
     this.haze.setZExaggeration(s.zExaggeration);
@@ -103,13 +119,58 @@ export class World {
     this.torusBodies.setBodies(this.withPinned(s.landmarks, s));
   }
 
+  private paintOverlay(s: AppState, force: boolean): void {
+    const overlay = this.midplane;
+    if (!overlay) return;
+    overlay.show(s.overlay !== "none");
+    if (s.overlay === "none") return;
+    const dark = agnDarkNow(s);
+    const staged = s.overlay === "fate" && s.eraMode;
+    const key = `${s.overlay}|${s.eraMode}|${dark}|${staged ? s.eraYr : ""}`;
+    if (key === this.paintedKey) return;
+    const now = performance.now();
+    if (!force && staged && now - this.paintedAt < STAGE_REPAINT_MS) return;
+    this.paintedKey = key;
+    this.paintedAt = now;
+    if (s.overlay === "temperature") overlay.paint(temperaturePaint(s.population, s.params, dark));
+    else overlay.paint(staged ? stagePaint(s.population, s.params, s.eraYr) : fatePaint(s.population, s.params));
+  }
+
+  private bodyLook(s: AppState): LookUp {
+    if (!s.eraMode) return BIRTH_LOOK;
+    return (b) => {
+      const e = epochState(blanetTrack(b, s.params), s.eraYr);
+      return { mass: e.mass, hidden: e.stage === "dust" || e.stage === "never", remnant: e.stage === "remnant" };
+    };
+  }
+
+  private advanceEpoch(s: AppState, dt: number): void {
+    if (s.eraSweeping) {
+      const next = Math.min(s.eraYr * 10 ** (SWEEP_DECADES_PER_SECOND * dt), EPOCH_MAX_YR);
+      store.state.eraYr = next;
+      if (next >= EPOCH_MAX_YR) store.set({ eraYr: next, eraSweeping: false });
+    }
+    const e = store.state;
+    const gas = e.eraMode ? gasRemaining(e.eraYr, e.params) : 1;
+    this.planets?.setEpoch(e.eraMode, e.eraYr, e.params.agnLifetimeYr);
+    this.haze?.setFade(gas);
+    this.localDecor?.setGas(gas);
+    this.decor?.setShining(agnDarkNow(e) ? 0 : 1);
+    this.midplane?.setOpacity(e.overlay === "temperature" ? gas : 1);
+    this.paintOverlay(e, false);
+    const env = commsEnvironment(e);
+    const skyKey = `${env.agnLuminosity > 0}|${env.gasFraction > 0}`;
+    if (this.skyKey && skyKey !== this.skyKey) store.set({ network: null, networkBuiltAtYr: null, route: null });
+    this.skyKey = skyKey;
+  }
+
   private rebuildPlanets(s: AppState): void {
     if (this.planets) {
       this.torusGroup.remove(this.planets.points);
       this.planets.dispose();
     }
     const mSmbh = smbhMassKg(s.params);
-    this.planets = buildPlanetCloud(s.population, s.impostors, mSmbh, floorRadius(s.params.rMinPc), s.colorBy, s.params.agnLifetimeYr);
+    this.planets = buildPlanetCloud(s.population, s.impostors, mSmbh, floorRadius(s.params.rMinPc), s.colorBy, s.params);
     this.planets.setZExaggeration(s.zExaggeration);
     this.torusGroup.add(this.planets.points);
   }
@@ -206,6 +267,7 @@ export class World {
   private frame(dt: number): void {
     const s = store.state;
     if (s.playing) store.state.timeYr = s.timeYr + s.speedYrPerSec * dt;
+    this.advanceEpoch(s, dt);
     const t = store.state.timeYr * YR;
     const mSmbh = smbhMassKg(s.params);
     this.map =
@@ -218,7 +280,7 @@ export class World {
     const layer = s.view === "torus" ? this.torusBodies : this.localBodies;
     const wanted = this.withPinned(s.view === "torus" ? s.landmarks : s.focus.blanets, s);
     if (wanted.length !== layer.bodies.length || wanted.some((b, i) => b !== layer.bodies[i])) layer.setBodies(wanted);
-    layer.update(this.map, t, mSmbh, highlight);
+    layer.update(this.map, t, mSmbh, highlight, this.bodyLook(store.state));
 
     if (s.view === "local" && s.selected) this.rebuildSelectedOrbit(s);
     this.selectedOrbit.update(this.map);
@@ -263,6 +325,7 @@ export class World {
 
   private renderLabels(s: AppState, t: number, mSmbh: number): void {
     const specs: LabelSpec[] = [];
+    if (s.view === "torus" && this.midplane?.showsLabels) specs.push(...this.midplane.labels);
     if (s.view === "torus" && this.decor) {
       for (const r of this.decor.rings) {
         specs.push({

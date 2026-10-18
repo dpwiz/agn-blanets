@@ -135,7 +135,7 @@ body {
 .panel {
   position: fixed;
   top: 16px;
-  bottom: 84px;
+  bottom: calc(var(--timebar-h, 56px) + 28px);
   width: min(340px, calc(100vw - 32px));
   background: var(--panel);
   backdrop-filter: blur(10px);
@@ -552,11 +552,12 @@ details.advanced summary {
   left: 16px;
   right: 16px;
   bottom: 16px;
-  height: 56px;
+  min-height: 56px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
-  padding: 0 16px;
+  gap: 8px 18px;
+  padding: 8px 16px;
   background: var(--panel);
   backdrop-filter: blur(10px);
   border: 1px solid var(--panel-edge);
@@ -625,6 +626,198 @@ details.advanced summary {
 
 .timebar .spacer {
   flex: 1;
+}
+
+.timebar .play.small {
+  width: 32px;
+  height: 32px;
+  font-size: 0.85rem;
+}
+
+.timebar .play:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.era-row {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px 18px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-edge);
+}
+
+.era-readout {
+  min-width: 230px;
+  max-width: 300px;
+  font-size: var(--step--1);
+  color: var(--haze);
+  line-height: 1.3;
+}
+
+.era-readout strong {
+  color: var(--ember-hot);
+  font-size: var(--step-0);
+  font-weight: 600;
+}
+
+.era-readout .source {
+  margin-right: 6px;
+}
+
+.era-track {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  height: 40px;
+}
+
+.era-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 11px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(167, 155, 214, 0.22);
+  overflow: hidden;
+}
+
+.era-zone.shining {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, var(--oxblood), var(--ember) 70%, var(--ember-hot));
+}
+
+.era-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.era-mark {
+  position: absolute;
+  top: 22px;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  color: var(--haze-dim);
+  white-space: nowrap;
+}
+
+.era-mark.start {
+  transform: none;
+}
+
+.era-mark.end {
+  transform: translateX(-100%);
+}
+
+.era-mark.off {
+  color: var(--ember-hot);
+  top: 22px;
+}
+
+.era-mark.off::before,
+.era-mark.first::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -12px;
+  height: 10px;
+  border-left: 1px solid currentColor;
+}
+
+.era-mark.first {
+  top: -5px;
+  color: var(--bone);
+}
+
+.era-mark.first::before {
+  top: 14px;
+}
+
+.era-track input[type="range"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  width: 100%;
+  margin: 0;
+  height: 20px;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.era-track input[type="range"]::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 20px;
+}
+
+.era-track input[type="range"]::-moz-range-track {
+  background: transparent;
+}
+
+.era-track input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 4px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--bone);
+  box-shadow: 0 0 0 3px rgba(239, 230, 214, 0.18);
+}
+
+.era-track input[type="range"]::-moz-range-thumb {
+  width: 4px;
+  height: 20px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--bone);
+  box-shadow: 0 0 0 3px rgba(239, 230, 214, 0.18);
+}
+
+.era-row.off .era-track {
+  opacity: 0.35;
+}
+
+.era-row.off .era-track input {
+  cursor: default;
+}
+
+.ambient-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--haze);
+}
+
+.ambient-legend i {
+  display: inline-block;
+  width: 72px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.scene-label.overlay {
+  transform: translate(6px, -50%);
+  color: var(--bone);
+}
+
+.scene-label.overlay small {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--haze);
+}
+
+.scene-label.overlay.zone {
+  font-family: var(--display);
+  font-size: var(--step-0);
+  color: var(--ember-hot);
 }
 
 .legend {
@@ -777,6 +970,53 @@ details.advanced summary {
   .timebar .legend,
   .timebar .spacer {
     display: none;
+  }
+
+  .era-row {
+    display: none;
+    flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  body.show-era .era-row {
+    display: flex;
+  }
+
+  .era-row .ambient-legend {
+    display: none;
+  }
+
+  .era-row .group,
+  .overlay-switch {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .timebar .overlay-switch button {
+    white-space: normal;
+    line-height: 1.15;
+  }
+
+  .era-readout {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .era-track {
+    flex-basis: 100%;
+    order: 5;
+  }
+
+  .era-row .group {
+    flex-basis: 100%;
+    order: 6;
+  }
+
+  .overlay-switch button {
+    flex: 1;
+    padding-left: 4px;
+    padding-right: 4px;
   }
 }
 

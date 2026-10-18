@@ -1,11 +1,12 @@
-import { blanetDetails, MASS_SCATTER_DEX } from "../physics/bodies";
+import { blanetDetails, blanetTrack, MASS_SCATTER_DEX, type Blanet } from "../physics/bodies";
+import { epochState, livingConditions, SOLAR_CONSTANT, type Stage } from "../physics/era";
 import { circularOrbitClockRate, clockLagPerYear } from "../physics/clocks";
-import { C_LIGHT, PC, YR } from "../physics/constants";
+import { C_LIGHT, L_SUN, PC, YR } from "../physics/constants";
 import { CLASS_LABEL, FATE_LABEL } from "../physics/fate";
 import { meanMotion, orbitalPeriod, orbitalPosition } from "../physics/kepler";
 import { surfaceEscapeSpeed } from "../physics/transfer";
 import { deriveFocus, smbhMassKg, store, type AppState } from "../state";
-import { distanceWithLight, duration, length, mass, sci, speed } from "../format";
+import { distanceWithLight, duration, epoch, length, mass, sci, speed } from "../format";
 import { h, readout } from "./dom";
 
 export function shearNote(s: AppState): HTMLElement {
@@ -23,6 +24,52 @@ export function regatherButton(): HTMLElement {
 }
 
 const REGIME_TEXT = { hill: "Hill", bondi: "Bondi", geometric: "Geometric (barely accretes)" };
+
+const STAGE_TEXT: Record<Stage, string> = {
+  dust: "Still dust, its grains are growing",
+  never: "Never forms in this AGN episode",
+  planet: "Planet",
+  browndwarf: "Brown-dwarf mass",
+  dustStar: "Stellar-mass ball of dust, not burning hydrogen",
+  star: "Star",
+  massiveStar: "Massive star",
+  remnant: "Dead star, a remnant",
+};
+
+function epochSection(s: AppState, b: Blanet): HTMLElement[] {
+  if (!s.eraMode) return [];
+  const track = blanetTrack(b, s.params);
+  const e = epochState(track, s.eraYr);
+  const rows: [string, string, string?][] = [
+    ["Time since the AGN lit up", epoch(s.eraYr)],
+    ["Stage", STAGE_TEXT[e.stage], e.stage === "remnant" ? "bad" : undefined],
+    ["Forms at", Number.isFinite(track.bornYr) ? epoch(track.bornYr) : "never"],
+    ["Mass now", e.stage === "dust" || e.stage === "never" ? "not yet a body" : mass(e.mass), "big"],
+  ];
+  if (e.ignitedYr !== null) rows.push(["Ignites hydrogen at", epoch(e.ignitedYr)]);
+  if (e.diesYr !== null) rows.push(["Burns out at", epoch(e.diesYr)]);
+  return [h("h3", { text: "At this point in time" }), readout(rows)];
+}
+
+function livingSection(s: AppState, b: Blanet, d: ReturnType<typeof blanetDetails>): HTMLElement[] {
+  const live = livingConditions(d.local, b.mass, b.radius, d.accretion.mdotDust + d.accretion.mdotGas, s.params);
+  const sky = live.skyOpticalDepth;
+  return [
+    h("h3", { text: "Living here while the AGN shines" }),
+    readout([
+      ["Glow from infalling pebbles", `${sci(live.glowLuminosity, 2)} W, ${sci(live.glowLuminosity / L_SUN, 2)} L☉`],
+      ["Surface glows at", `${sci(live.glowTemperature, 3)} K`],
+      ["Earth-like light for moons at", length(live.earthLightDistance)],
+      ["Sky overhead in visible light", `${sky >= 1 ? "opaque" : "clear"}, optical depth ${sci(sky, 2)}`, sky >= 1 ? "bad" : "good"],
+      ["Climb to the torus surface", `${speed(live.climbSpeed)} to rise ${length(live.surfaceHeight)}`],
+      ["AGN light up there", `${sci(live.agnFlux, 2)} W/m², ${sci(live.agnFlux / SOLAR_CONSTANT, 2)}× sunlight at Earth`],
+    ]),
+    h("p", {
+      class: "axis-note",
+      text: "Our estimates from the model, not the paper's. The glow is the energy of falling pebbles and gas, using the uncompressed radius, so a real, denser body glows brighter and hotter. The sky depth counts the largest grains straight up through half the dust column. The torus surface sits at the photosphere height the paper assumes.",
+    }),
+  ];
+}
 
 export function renderExplore(s: AppState): HTMLElement {
   const b = s.selected;
@@ -74,9 +121,9 @@ export function renderExplore(s: AppState): HTMLElement {
     "div",
     { class: "body-card" },
     h("h2", { text: b.name }),
-    h("p", { class: "kind", text: CLASS_LABEL[d.fate.objectClass] }),
+    h("p", { class: "kind", text: s.eraMode ? `At birth: ${CLASS_LABEL[d.fate.objectClass]}` : CLASS_LABEL[d.fate.objectClass] }),
     readout([
-      ["Mass", mass(b.mass), "big"],
+      [s.eraMode ? "Birth mass" : "Mass", mass(b.mass), "big"],
       ["Radius if uncompressed", length(b.radius)],
       ["Surface escape speed", speed(escape)],
       ["Distance from the hole", distanceWithLight(b.orbit.radius)],
@@ -95,6 +142,8 @@ export function renderExplore(s: AppState): HTMLElement {
       ["Could reach", growing ? mass(d.fate.projectedMass) : "its birth mass"],
       ["Pebble isolation mass", mass(d.local.isolationMass)],
     ]),
+    ...epochSection(s, b),
+    ...livingSection(s, b, d),
     h("h3", { text: "Its clock" }),
     readout([
       ["Runs slow by", `${duration(clockLagPerYear(rate))} per year`],

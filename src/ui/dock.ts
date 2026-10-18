@@ -32,6 +32,7 @@ const RERENDER_ON: (keyof AppState)[] = [
   "clockSyncYr",
   "view",
   "focus",
+  "eraMode",
 ];
 
 export function mountDock(root: HTMLElement, onFrame: (hook: (dt: number) => void) => void): void {
@@ -63,14 +64,20 @@ export function mountDock(root: HTMLElement, onFrame: (hook: (dt: number) => voi
     if (changed.has("tab")) renderTabs(s);
     if ((changed.has("origin") || changed.has("target")) && refreshRoute(s)) return;
     if (RERENDER_ON.some((k) => changed.has(k))) renderBody(s);
+    else if (changed.has("eraYr") && s.eraMode && (s.tab === "explore" || s.tab === "signal")) renderBody(s);
   });
 
   let acc = 0;
+  let renderedEraYr = store.state.eraYr;
   onFrame((dt) => {
     acc += dt;
     if (acc < 0.25) return;
     acc = 0;
     const s = store.state;
+    if (s.eraSweeping && s.tab === "explore" && s.selected && s.eraYr !== renderedEraYr) {
+      renderedEraYr = s.eraYr;
+      renderBody(s);
+    }
     if (s.tab === "signal") {
       tickSignal(s);
       tickNetwork(s);

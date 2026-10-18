@@ -2,9 +2,9 @@ import { BANDS, linkBudget, type BandId } from "../physics/comms";
 import { YR } from "../physics/constants";
 import { orbitalPosition } from "../physics/kepler";
 import { pairCoverage, shortestRoute, type NetworkGraph } from "../physics/network";
-import { commsEnvironment, smbhMassKg, store, type AppState } from "../state";
+import { agnDarkNow, commsEnvironment, smbhMassKg, store, type AppState } from "../state";
 import type { NetworkRequest } from "../workers/network.worker";
-import { dataRate, decibels, distanceWithLight, duration, sci } from "../format";
+import { dataRate, decibels, distanceWithLight, duration, epoch, sci } from "../format";
 import { h, readout, segmented, slider } from "./dom";
 import { slots } from "./slots";
 import { regatherButton, shearNote } from "./explore";
@@ -66,7 +66,8 @@ export function tickNetwork(s: AppState): void {
 
 let liveTarget: HTMLElement | null = null;
 
-function glareShare(glare: number, thermal: number): string {
+function glareShare(glare: number, thermal: number, agnDark: boolean): string {
+  if (agnDark) return "none, the AGN is dark";
   const share = glare / (glare + thermal);
   if (share < 1e-6) return "negligible, the torus shades it";
   return `${sci(100 * share, 2)}%`;
@@ -87,7 +88,7 @@ function linkRows(s: AppState): HTMLElement {
     ["Gas optical depth", sci(l.tauGas, 3)],
     ["Signal to noise", decibels(l.snr), l.snr > 1 ? "good" : "bad"],
     ["Data rate", blocked ?? dataRate(l.capacity), l.capacity >= 1 ? "big" : "bad"],
-    ["AGN glare share of noise", glareShare(l.glareNoise, l.thermalNoise)],
+    ["AGN glare share of noise", glareShare(l.glareNoise, l.thermalNoise, agnDarkNow(s))],
   ]);
 }
 
@@ -150,10 +151,23 @@ function networkSection(s: AppState): HTMLElement {
   return wrap;
 }
 
+function skyNote(s: AppState): HTMLElement | null {
+  if (!agnDarkNow(s)) return null;
+  const env = commsEnvironment(s);
+  return h("p", {
+    class: "callout",
+    text:
+      env.gasFraction <= 0
+        ? `At ${epoch(s.eraYr)} the AGN is dark and the gas has dispersed: no dust, no glare, every band gets through. Set by the era control below.`
+        : `At ${epoch(s.eraYr)} the AGN is dark, so there is no glare, and the dust is dispersing: ${Math.round(env.gasFraction * 100)}% of it still dims the beam.`,
+  });
+}
+
 export function renderSignal(s: AppState): HTMLElement {
   const parts: (HTMLElement | null)[] = [
     h("h2", { text: "Send a signal" }),
     h("p", { text: "Light takes days to cross between neighbours and years to cross the torus. Dust swallows short wavelengths, the inner disk blocks the far side, and the black hole bends and slows anything that passes close." }),
+    skyNote(s),
     slots(s, { origin: "Transmitter", target: "Receiver" }),
     segmented<BandId>(
       "Band",

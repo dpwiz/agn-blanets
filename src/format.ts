@@ -97,3 +97,10 @@ export function simTime(years: number): string {
   if (years < 1e6) return `${(years / 1e3).toLocaleString("en-US", { maximumFractionDigits: 2 })} kyr`;
   return `${(years / 1e6).toLocaleString("en-US", { maximumFractionDigits: 3 })} Myr`;
 }
+
+export function epoch(years: number): string {
+  if (years >= 1e9) return `${sci(years / 1e9, 3)} Gyr`;
+  if (years >= 1e6) return `${sci(years / 1e6, 3)} Myr`;
+  if (years >= 1e3) return `${sci(years / 1e3, 3)} kyr`;
+  return `${sci(years, 3)} yr`;
+}

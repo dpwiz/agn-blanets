@@ -5,6 +5,7 @@ import { accretionContext, radialState, type RadialState } from "./model";
 import { accretionAt, geometricRadius, type AccretionState } from "./accretion";
 import type { ModelParams } from "./params";
 import type { PopulationSummary, RadialBin } from "./population";
+import { growthTrack, type GrowthTrack } from "./era";
 
 export interface Blanet {
   id: number;
@@ -163,4 +164,15 @@ export function blanetDetails(b: Blanet, p: ModelParams): BlanetDetails {
     agnLifetimeYr: p.agnLifetimeYr,
   });
   return { local, accretion, fate };
+}
+
+const trackCache = new WeakMap<Blanet, { params: ModelParams; track: GrowthTrack }>();
+
+export function blanetTrack(b: Blanet, p: ModelParams): GrowthTrack {
+  const hit = trackCache.get(b);
+  if (hit && hit.params === p) return hit.track;
+  const d = blanetDetails(b, p);
+  const track = growthTrack(d.local, b.mass, d.accretion.doublingTime, p);
+  trackCache.set(b, { params: p, track });
+  return track;
 }

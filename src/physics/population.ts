@@ -1,4 +1,5 @@
 import { PC } from "./constants";
+import { formsDuringAgn } from "./era";
 import { logspace } from "./math";
 import { radialState, type RadialState } from "./model";
 import type { ModelParams } from "./params";
@@ -26,8 +27,7 @@ export interface PopulationSummary {
 }
 
 export function formsPlanetsAt(state: RadialState, p: ModelParams): boolean {
-  if (p.countingMode === "paper") return true;
-  return state.streamingAllowed && state.grainsGrowInTime;
+  return p.countingMode === "paper" || formsDuringAgn(state);
 }
 
 export function filamentsPerRing(state: RadialState, p: ModelParams): number {

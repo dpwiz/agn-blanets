@@ -2,6 +2,7 @@ import { finalizeBlanets, sampleFocusCloud, sampleImpostorCloud, sampleLandmarks
 import type { BandId, CommsEnvironment, Transceiver } from "./physics/comms";
 import { DEFAULT_RIG } from "./physics/comms";
 import { smbhMass } from "./physics/disk";
+import { agnShining, gasRemaining } from "./physics/era";
 import { buildDiskTable, type DiskTable } from "./physics/disktable";
 import { PC, YR } from "./physics/constants";
 import { meanMotion } from "./physics/kepler";
@@ -16,6 +17,7 @@ export type ColorBy = "mass" | "regime" | "fate";
 export type DockTab = "explore" | "hop" | "signal" | "clocks";
 export type HopKind = "orbital" | "torch";
 export type SlotRole = "origin" | "target";
+export type Overlay = "none" | "temperature" | "fate";
 
 export interface FocusPatch {
   radius: number;
@@ -59,6 +61,10 @@ export interface AppState {
   route: Route | null;
   showNetwork: boolean;
   clockSyncYr: number;
+  overlay: Overlay;
+  eraMode: boolean;
+  eraYr: number;
+  eraSweeping: boolean;
 }
 
 type Listener = (state: AppState, changed: Set<keyof AppState>) => void;
@@ -69,8 +75,19 @@ const FOCUS_COUNT = 320;
 
 export const smbhMassKg = smbhMass;
 
+export function agnDarkNow(s: AppState): boolean {
+  return s.eraMode && !agnShining(s.eraYr, s.params);
+}
+
 export function commsEnvironment(s: AppState): CommsEnvironment {
-  return { table: s.table, mSmbh: smbhMass(s.params), agnLuminosity: s.params.irradiationLuminosity, innerDiskRadius: s.params.rMinPc * PC };
+  const dark = agnDarkNow(s);
+  return {
+    table: s.table,
+    mSmbh: smbhMass(s.params),
+    agnLuminosity: dark ? 0 : s.params.irradiationLuminosity,
+    innerDiskRadius: s.params.rMinPc * PC,
+    gasFraction: s.eraMode ? gasRemaining(s.eraYr, s.params) : 1,
+  };
 }
 
 export function derivePopulation(params: ModelParams) {
@@ -142,6 +159,10 @@ function initialState(): AppState {
     route: null,
     showNetwork: false,
     clockSyncYr: 0,
+    overlay: "none",
+    eraMode: false,
+    eraYr: params.agnLifetimeYr / 2,
+    eraSweeping: false,
   };
 }
 

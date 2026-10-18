@@ -20,6 +20,7 @@ import { LOCAL_PATCH_UNITS } from "./viewmap";
 export interface LocalDecor {
   group: Group;
   setZExaggeration(z: number): void;
+  setGas(fraction: number): void;
   dispose(): void;
 }
 
@@ -28,7 +29,7 @@ const hazeMaterial = () =>
     transparent: true,
     depthWrite: false,
     blending: AdditiveBlending,
-    uniforms: { uZExag: { value: 1 }, uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) } },
+    uniforms: { uZExag: { value: 1 }, uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) }, uGas: { value: 1 } },
     vertexShader: `
       attribute vec3 aColor;
       uniform float uZExag;
@@ -43,10 +44,11 @@ const hazeMaterial = () =>
       }
     `,
     fragmentShader: `
+      uniform float uGas;
       varying vec3 vColor;
       void main() {
         float r = length(gl_PointCoord - 0.5) * 2.0;
-        float a = smoothstep(1.0, 0.0, r) * 0.06;
+        float a = smoothstep(1.0, 0.0, r) * 0.06 * uGas;
         gl_FragColor = vec4(vColor, a);
       }
     `,
@@ -103,6 +105,11 @@ export function buildLocalDecor(local: RadialState, patchRadius: number): LocalD
   return {
     group,
     setZExaggeration: setZ,
+    setGas(fraction) {
+      mat.uniforms.uGas.value = fraction;
+      haze.visible = fraction > 0;
+      for (const s of slabs) s.visible = fraction > 0;
+    },
     dispose() {
       group.traverse((o) => {
         const m = o as Mesh;
