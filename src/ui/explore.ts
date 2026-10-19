@@ -3,6 +3,7 @@ import { epochState, livingConditions, SOLAR_CONSTANT, type Stage } from "../phy
 import { circularOrbitClockRate, clockLagPerYear } from "../physics/clocks";
 import { C_LIGHT, L_SUN, PC, YR } from "../physics/constants";
 import { CLASS_LABEL, FATE_LABEL } from "../physics/fate";
+import { growthLimits } from "../physics/growth";
 import { meanMotion, orbitalPeriod, orbitalPosition } from "../physics/kepler";
 import { surfaceEscapeSpeed } from "../physics/transfer";
 import { deriveFocus, smbhMassKg, store, type AppState } from "../state";
@@ -30,7 +31,7 @@ const STAGE_TEXT: Record<Stage, string> = {
   never: "Never forms in this AGN episode",
   planet: "Planet",
   browndwarf: "Brown-dwarf mass",
-  dustStar: "Stellar-mass ball of dust, not burning hydrogen",
+  dustStar: "Stellar-mass body with too little hydrogen to burn",
   star: "Star",
   massiveStar: "Massive star",
   remnant: "Dead star, a remnant",
@@ -139,7 +140,9 @@ export function renderExplore(s: AppState): HTMLElement {
       ["Mass e-folding time", duration(d.accretion.doublingTime), growing ? "good" : undefined],
       ["Over the AGN lifetime", `${sci(d.fate.efoldings, 2)} e-foldings`],
       ["Likely fate", FATE_LABEL[d.fate.fate], growing ? "good" : undefined],
+      ["Its share of the ring's dust", mass(growthLimits(d.local).dustLeftPerBody)],
       ["Could reach", growing ? mass(d.fate.projectedMass) : "its birth mass"],
+      ["Hydrogen by then", growing ? `${sci((100 * d.fate.hydrogenMass) / d.fate.projectedMass, 2)}% of its mass` : "none"],
       ["Pebble isolation mass", mass(d.local.isolationMass)],
     ]),
     ...epochSection(s, b),
@@ -151,7 +154,7 @@ export function renderExplore(s: AppState): HTMLElement {
     ]),
     h("p", {
       class: "axis-note",
-      text: `Born pure dust in a filament ${length(d.local.filamentWidth)} wide; its siblings number about ${sci(d.local.planetesimalsPerFilament, 2)}. The paper gives one characteristic mass per radius; individual masses here scatter by ${MASS_SCATTER_DEX} dex around it, our assumption. "Could reach" extrapolates the current growth rate over the AGN lifetime, capped at the thermal mass; the paper itself only separates bodies that grow from those that do not. The radius assumes rock at ${sci(s.params.grainDensity / 1000, 2)} g/cm³, though the paper expects degenerate cores well below a Jupiter mass.`,
+      text: `Born pure dust in a filament ${length(d.local.filamentWidth)} wide; its siblings number about ${sci(d.local.planetesimalsPerFilament, 2)}. The paper gives one characteristic mass per radius; individual masses here scatter by ${MASS_SCATTER_DEX} dex around it, our assumption. "Could reach" is our estimate: the body grows at its current rate while its ring's dust lasts, sharing that dust evenly with its neighbours, and gathers gas at the paper's gas-to-pebble ratio. It shines as a star only once it holds as much hydrogen as the lightest ordinary star. The paper itself only separates bodies that grow from those that do not. The radius assumes rock at ${sci(s.params.grainDensity / 1000, 2)} g/cm³, though the paper expects degenerate cores well below a Jupiter mass.`,
     }),
     h("div", { class: "button-row" }, visit, hop, signal),
     h("p", { class: "axis-note", text: `Orbit ${(b.orbit.radius / PC).toPrecision(4)} pc, inclination ${sci((b.orbit.inclination * 180) / Math.PI, 2)}°.` }),

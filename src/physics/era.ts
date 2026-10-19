@@ -1,7 +1,8 @@
-import { G, HYDROGEN_BURNING_MASS, M_JUP, M_SUN, PC, SIGMA_SB, YR } from "./constants";
+import { G, HYDROGEN_BURNING_MASS, M_SUN, PC, SIGMA_SB, YR } from "./constants";
 import { dustOpacity } from "./comms";
 import { diskAt } from "./disk";
 import { DEUTERIUM_BURNING_MASS } from "./fate";
+import { efoldingsToReach, grownMass, growthLimits, ignitionMass, supplyMass } from "./growth";
 import { bisectLog } from "./math";
 import type { RadialState } from "./model";
 import type { ModelParams } from "./params";
@@ -22,8 +23,10 @@ export interface GrowthTrack {
   birthMass: number;
   bornYr: number;
   efoldingTimeYr: number;
+  supplyMass: number;
   ceilingMass: number;
   growthEndsYr: number;
+  ignitionMass: number | null;
 }
 
 export interface EpochState {
@@ -38,50 +41,57 @@ export function formsDuringAgn(state: RadialState): boolean {
 }
 
 export function growthTrack(state: RadialState, birthMass: number, efoldingTime: number, p: ModelParams): GrowthTrack {
+  const limits = growthLimits(state);
+  const supply = supplyMass(birthMass, limits);
+  const ceiling = Math.max(state.thermalMass, birthMass);
   return {
     birthMass,
     bornYr: formsDuringAgn(state) ? state.dust.tSI / YR : Infinity,
     efoldingTimeYr: efoldingTime / YR,
-    ceilingMass: Math.max(state.thermalMass, birthMass),
+    supplyMass: supply,
+    ceilingMass: ceiling,
     growthEndsYr: p.agnLifetimeYr,
+    ignitionMass: ignitionMass(birthMass, Math.min(supply, ceiling), limits),
   };
 }
 
 export function massAtAge(track: GrowthTrack, ageYr: number): number {
   if (!(ageYr > track.bornYr)) return track.birthMass;
   const grown = Math.max(Math.min(ageYr, track.growthEndsYr) - track.bornYr, 0);
-  const exponent = Math.min(grown / track.efoldingTimeYr, 700);
-  return Math.min(track.birthMass * Math.exp(exponent), track.ceilingMass);
+  return grownMass(track.birthMass, grown / track.efoldingTimeYr, track.supplyMass, track.ceilingMass);
+}
+
+export function finalMass(track: GrowthTrack): number {
+  return massAtAge(track, track.growthEndsYr);
 }
 
 export function stellarLifetimeYr(mass: number): number {
   return Math.max(SUN_LIFETIME_YR * (mass / M_SUN) ** -STELLAR_LIFETIME_SLOPE, SHORTEST_STELLAR_LIFETIME_YR);
 }
 
-export function ignitionMass(birthMass: number): number {
-  return birthMass < HYDROGEN_BURNING_MASS ? HYDROGEN_BURNING_MASS : birthMass * Math.E;
+export function ignitionYr(track: GrowthTrack): number | null {
+  if (!Number.isFinite(track.bornYr) || track.ignitionMass === null) return null;
+  const t = track.bornYr + track.efoldingTimeYr * efoldingsToReach(track.birthMass, track.ignitionMass, track.supplyMass);
+  return t <= track.growthEndsYr ? t : null;
 }
 
-export function ignitionYr(track: GrowthTrack): number | null {
-  if (!Number.isFinite(track.bornYr)) return null;
-  const threshold = ignitionMass(track.birthMass);
-  if (track.ceilingMass < threshold) return null;
-  const t = track.bornYr + track.efoldingTimeYr * Math.log(threshold / track.birthMass);
-  return t <= track.growthEndsYr ? t : null;
+export function deathYr(track: GrowthTrack): number | null {
+  const ignited = ignitionYr(track);
+  return ignited === null ? null : ignited + stellarLifetimeYr(finalMass(track));
 }
 
 export function epochState(track: GrowthTrack, ageYr: number): EpochState {
   if (!Number.isFinite(track.bornYr)) return { stage: "never", mass: track.birthMass, ignitedYr: null, diesYr: null };
   if (ageYr < track.bornYr) return { stage: "dust", mass: track.birthMass, ignitedYr: null, diesYr: null };
   const mass = massAtAge(track, ageYr);
-  if (mass < DEUTERIUM_BURNING_MASS) return { stage: "planet", mass, ignitedYr: null, diesYr: null };
   const ignited = ignitionYr(track);
-  if (ignited === null || ageYr < ignited) {
-    return { stage: mass < HYDROGEN_BURNING_MASS ? "browndwarf" : "dustStar", mass, ignitedYr: ignited, diesYr: null };
+  if (ignited !== null && ageYr >= ignited) {
+    const diesYr = deathYr(track)!;
+    if (ageYr >= diesYr) return { stage: "remnant", mass, ignitedYr: ignited, diesYr };
+    return { stage: mass >= MASSIVE_STAR_MASS ? "massiveStar" : "star", mass, ignitedYr: ignited, diesYr };
   }
-  const diesYr = ignited + stellarLifetimeYr(mass);
-  if (ageYr >= diesYr) return { stage: "remnant", mass, ignitedYr: ignited, diesYr };
-  return { stage: mass >= MASSIVE_STAR_MASS ? "massiveStar" : "star", mass, ignitedYr: ignited, diesYr };
+  if (mass < DEUTERIUM_BURNING_MASS) return { stage: "planet", mass, ignitedYr: ignited, diesYr: null };
+  return { stage: mass < HYDROGEN_BURNING_MASS ? "browndwarf" : "dustStar", mass, ignitedYr: ignited, diesYr: null };
 }
 
 export function agnShining(ageYr: number, p: ModelParams): boolean {
@@ -121,7 +131,3 @@ export function livingConditions(state: RadialState, mass: number, radius: numbe
     agnFlux: p.irradiationLuminosity / (4 * Math.PI * state.disk.r * state.disk.r),
   };
 }
-
-export const LOG_HYDROGEN_BURNING_MJUP = Math.log10(HYDROGEN_BURNING_MASS / M_JUP);
-export const LOG_DEUTERIUM_BURNING_MJUP = Math.log10(DEUTERIUM_BURNING_MASS / M_JUP);
-export const LOG_MASSIVE_STAR_MJUP = Math.log10(MASSIVE_STAR_MASS / M_JUP);

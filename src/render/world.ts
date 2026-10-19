@@ -23,6 +23,7 @@ export const TORUS_CAMERA = { position: new Vector3(0, 36, 112), target: new Vec
 export const LOCAL_CAMERA = { position: new Vector3(0, 16, 24), target: new Vector3(0, 0, 0) };
 export const SWEEP_DECADES_PER_SECOND = 0.5;
 const STAGE_REPAINT_MS = 100;
+const GAS_STEPS = 20;
 
 function lightTimeLabel(pc: number): string {
   const years = (pc * PC) / (C_LIGHT * YR);
@@ -126,13 +127,14 @@ export class World {
     if (s.overlay === "none") return;
     const dark = agnDarkNow(s);
     const staged = s.overlay === "fate" && s.eraMode;
-    const key = `${s.overlay}|${s.eraMode}|${dark}|${staged ? s.eraYr : ""}`;
+    const gas = s.eraMode ? Math.round(gasRemaining(s.eraYr, s.params) * GAS_STEPS) / GAS_STEPS : 1;
+    const key = `${s.overlay}|${s.eraMode}|${dark}|${gas}|${staged ? s.eraYr : ""}`;
     if (key === this.paintedKey) return;
     const now = performance.now();
     if (!force && staged && now - this.paintedAt < STAGE_REPAINT_MS) return;
     this.paintedKey = key;
     this.paintedAt = now;
-    if (s.overlay === "temperature") overlay.paint(temperaturePaint(s.population, s.params, dark));
+    if (s.overlay === "temperature") overlay.paint(temperaturePaint(s.population, s.params, dark, gas));
     else overlay.paint(staged ? stagePaint(s.population, s.params, s.eraYr) : fatePaint(s.population, s.params));
   }
 

@@ -8,15 +8,10 @@ import {
   ShaderMaterial,
 } from "three";
 import { IMPOSTOR_STRIDE } from "../physics/bodies";
-import { M_JUP, M_SUN, PC, YR } from "../physics/constants";
-import {
-  growthTrack,
-  LOG_HYDROGEN_BURNING_MJUP,
-  SHORTEST_STELLAR_LIFETIME_YR,
-  STELLAR_LIFETIME_SLOPE,
-  SUN_LIFETIME_YR,
-} from "../physics/era";
+import { M_JUP, PC, YR } from "../physics/constants";
+import { deathYr, growthTrack } from "../physics/era";
 import { fateOf } from "../physics/fate";
+import { growthLimits } from "../physics/growth";
 import { meanMotion } from "../physics/kepler";
 import { gaussian, mulberry32 } from "../physics/math";
 import type { ModelParams } from "../physics/params";
@@ -70,7 +65,9 @@ const planetVertexShader = `
   attribute float aLogM0;
   attribute float aBorn;
   attribute float aRate;
+  attribute float aLogSupply;
   attribute float aLogCeil;
+  attribute float aDies;
   attribute vec3 aColor;
   uniform float uTime;
   uniform float uZExag;
@@ -81,11 +78,6 @@ const planetVertexShader = `
   uniform float uMassColor;
   uniform float uMassAt[${MASS_STOPS.length}];
   uniform vec3 uMassStops[${MASS_STOPS.length}];
-  uniform float uLogHydrogen;
-  uniform float uLogSunInMjup;
-  uniform float uLogSunLifetime;
-  uniform float uLifetimeSlope;
-  uniform float uShortestLifetime;
   uniform vec3 uRemnantColor;
   varying vec3 vColor;
   varying float vAlpha;
@@ -98,20 +90,24 @@ const planetVertexShader = `
     return uMassStops[${MASS_STOPS.length - 1}];
   }
 
+  float grownLogMass(float efoldings) {
+    float headroom = aLogSupply - aLogM0;
+    if (headroom <= 1e-6 || efoldings <= 0.0) return aLogM0;
+    float supply = pow(10.0, headroom);
+    float rate = supply / (supply - 1.0);
+    float grown = supply / (1.0 + (supply - 1.0) * exp(-min(efoldings * rate, 80.0)));
+    return aLogM0 + log(grown) * 0.4342945;
+  }
+
   void main() {
     float lm = aLogM0;
     float alpha = 1.0;
     float remnant = 0.0;
     if (uEraOn > 0.5) {
       alpha = uAge < aBorn ? 0.0 : 1.0;
-      float grown = max(min(uAge, uGrowthEnds) - aBorn, 0.0);
-      lm = min(aLogM0 + grown * aRate, aLogCeil);
-      float threshold = aLogM0 < uLogHydrogen ? uLogHydrogen : aLogM0 + 0.4342945;
-      if (lm >= threshold && grown > 0.0) {
-        float ignition = aBorn + (threshold - aLogM0) / max(aRate, 1e-30);
-        float lifetime = max(pow(10.0, uLogSunLifetime - uLifetimeSlope * (lm - uLogSunInMjup)), uShortestLifetime);
-        remnant = uAge - ignition >= lifetime ? 1.0 : 0.0;
-      }
+      float efoldings = max(min(uAge, uGrowthEnds) - aBorn, 0.0) * aRate;
+      lm = min(grownLogMass(efoldings), aLogCeil);
+      remnant = uAge >= aDies ? 1.0 : 0.0;
     }
     float angle = aPhase + aMeanMotion * uTime;
     vec3 p = vec3(aRadius * cos(angle), aHeight * aRadius * uZExag, -aRadius * sin(angle));
@@ -153,11 +149,6 @@ function planetMaterial(massColoring: boolean) {
       uMassColor: { value: massColoring ? 1 : 0 },
       uMassAt: { value: MASS_STOPS.map(([at]) => at) },
       uMassStops: { value: MASS_STOPS.map(([, c]) => c) },
-      uLogHydrogen: { value: LOG_HYDROGEN_BURNING_MJUP },
-      uLogSunInMjup: { value: Math.log10(M_SUN / M_JUP) },
-      uLogSunLifetime: { value: Math.log10(SUN_LIFETIME_YR) },
-      uLifetimeSlope: { value: STELLAR_LIFETIME_SLOPE },
-      uShortestLifetime: { value: SHORTEST_STELLAR_LIFETIME_YR },
       uRemnantColor: { value: REMNANT_COLOR },
     },
   });
@@ -243,7 +234,9 @@ export function buildPlanetCloud(
   const logM0 = new Float32Array(count);
   const born = new Float32Array(count);
   const rate = new Float32Array(count);
+  const logSupply = new Float32Array(count);
   const logCeil = new Float32Array(count);
+  const dies = new Float32Array(count);
   const color = new Float32Array(count * 3);
   const binOf = binIndexer(pop);
   const c = new Color();
@@ -259,14 +252,16 @@ export function buildPlanetCloud(
     const state = pop.bins[binOf(r)].state;
     const track = growthTrack(state, m, state.accretion.doublingTime, p);
     born[i] = Number.isFinite(track.bornYr) ? track.bornYr : NEVER_BORN_YR;
-    rate[i] = 1 / (track.efoldingTimeYr * Math.LN10);
+    rate[i] = 1 / track.efoldingTimeYr;
+    logSupply[i] = Math.log10(track.supplyMass / M_JUP);
     logCeil[i] = Math.log10(track.ceilingMass / M_JUP);
+    dies[i] = deathYr(track) ?? NEVER_BORN_YR;
     if (colorBy === "regime") c.copy(REGIME_COLOR[state.accretion.regime]);
     else if (colorBy === "fate") {
       const f = fateOf({
         mass: m,
         doublingTime: state.accretion.doublingTime,
-        thermalMass: state.thermalMass,
+        limits: growthLimits(state),
         regime: state.accretion.regime,
         agnLifetimeYr: p.agnLifetimeYr,
       });
@@ -283,7 +278,9 @@ export function buildPlanetCloud(
   g.setAttribute("aLogM0", new BufferAttribute(logM0, 1));
   g.setAttribute("aBorn", new BufferAttribute(born, 1));
   g.setAttribute("aRate", new BufferAttribute(rate, 1));
+  g.setAttribute("aLogSupply", new BufferAttribute(logSupply, 1));
   g.setAttribute("aLogCeil", new BufferAttribute(logCeil, 1));
+  g.setAttribute("aDies", new BufferAttribute(dies, 1));
   g.setAttribute("aColor", new BufferAttribute(color, 3));
   return wrap(g, planetMaterial(colorBy === "mass"));
 }

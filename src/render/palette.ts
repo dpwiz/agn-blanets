@@ -39,9 +39,12 @@ export const REGIME_COLOR: Record<PebbleRegime, Color> = {
   geometric: PALETTE.haze,
 };
 
+const UNLIT_COLOR = new Color("#c98fb0");
+
 export const FATE_COLOR: Record<ObjectFate, Color> = {
   frozen: new Color("#8a7fc4"),
   growing: PALETTE.ember,
+  unlit: UNLIT_COLOR,
   star: PALETTE.emberHot,
   bhProgenitor: PALETTE.thrust,
   imbhProgenitor: PALETTE.white,
@@ -54,7 +57,7 @@ export const STAGE_COLOR: Record<Stage, Color> = {
   never: new Color("#2a2547"),
   planet: new Color("#8a7fc4"),
   browndwarf: PALETTE.ember,
-  dustStar: new Color("#c98fb0"),
+  dustStar: UNLIT_COLOR,
   star: PALETTE.emberHot,
   massiveStar: PALETTE.white,
   remnant: REMNANT_COLOR,

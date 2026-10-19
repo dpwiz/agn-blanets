@@ -16,8 +16,14 @@ export interface RadialState {
   accretion: AccretionState;
   isolationMass: number;
   thermalMass: number;
+  bodiesPerArea: number;
+  dustPerBody: number;
   streamingAllowed: boolean;
   grainsGrowInTime: boolean;
+}
+
+export function filamentsPerRing(disk: DiskState, p: ModelParams): number {
+  return p.azimuthalFilaments ? (2 * Math.PI * disk.r) / disk.H : 1;
 }
 
 export function accretionContext(disk: DiskState, eta: number, dust: DustState, p: ModelParams): AccretionContext {
@@ -31,17 +37,21 @@ export function radialState(r: number, p: ModelParams): RadialState {
   const mp = planetesimalMass(disk, p);
   const mf = filamentMass(disk, eta, p);
   const ctx = accretionContext(disk, eta, dust, p);
+  const width = filamentWidth(disk, eta);
+  const bodiesPerArea = (filamentsPerRing(disk, p) * (mf / mp)) / (2 * Math.PI * r * width);
   return {
     disk,
     eta,
     dust,
-    filamentWidth: filamentWidth(disk, eta),
+    filamentWidth: width,
     filamentMass: mf,
     planetesimalMass: mp,
     planetesimalsPerFilament: mf / mp,
     accretion: accretionAt(mp, ctx),
     isolationMass: pebbleIsolationMass(disk, p),
     thermalMass: thermalMass(disk),
+    bodiesPerArea,
+    dustPerBody: (disk.sigma * p.metallicity) / bodiesPerArea,
     streamingAllowed: dust.stMax >= p.stSI,
     grainsGrowInTime: dust.tSI < p.agnLifetimeYr * YR,
   };

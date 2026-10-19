@@ -27,14 +27,18 @@ The time bar's lower row switches between the paper's view (every body at its bi
 
 - A body appears once its grains reach the streaming-instability size, and only where the paper's formation conditions
   hold. With the fiducial parameters that leaves only the outer torus, whatever the Fig 6 counting mode says.
-- It grows at its local e-folding rate until the AGN switches off, capped at the thermal mass.
-- A body born above the hydrogen-burning mass stays unlit unless it grows by an e-fold. One that grows past that mass
-  shines for 10 Gyr × (M/M☉)^−2.5, at least 3 Myr, then leaves a remnant.
+- It grows at its local e-folding rate until the AGN switches off. The bodies of a ring share its dust evenly, so growth
+  slows as that share runs out (logistic growth), and the thermal mass caps it. Gas arrives at the paper's gas-to-pebble
+  ratio (Eqs 43–44), at most 2/9 of the pebble rate, so grown bodies stay mostly rock.
+- A body shines as a star once it holds as much hydrogen as the lightest ordinary star (0.7 × 0.075 M☉), then lives
+  10 Gyr × (M/M☉)^−2.5, at least 3 Myr, and leaves a remnant. With the paper's dust-to-gas ratio no body gathers that
+  much, so the timeline ends in brown dwarfs and stellar-mass balls of rock.
 - When the AGN dies, its glare goes and the gas disperses over a fifth of its lifetime. Growth stops, and the haze and
   the optical depth along every beam fade together, so every band in the Signal tool eventually gets through.
 
-The midplane maps show the gas temperature, with the 373, 273 and 170 K isotherms, and what bodies become: the paper's
-fate rule at birth, or their stage at the chosen time. Explore adds estimates of conditions on each body (accretion glow,
+The midplane maps show the gas temperature, with the 373 and 273 K isotherms and the frost line where water ice
+survives on the grains at the torus's own gas density, and what bodies become: the paper's fate rule with the growth
+above, or their stage at the chosen time. Explore adds estimates of conditions on each body (accretion glow,
 the sky's visible-light optical depth, the climb to the torus surface). These are our estimates, not the paper's.
 The Fly tool still uses birth masses.
 

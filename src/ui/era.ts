@@ -11,10 +11,10 @@ const LOG_MAX = Math.log10(EPOCH_MAX_YR);
 
 const ERA_ASSUMPTIONS = [
   "Bodies appear when their grains reach the streaming-instability size (t_SI), and only where the paper's formation conditions hold.",
-  "They then grow at their current e-folding rate until the AGN switches off, capped at the thermal mass, as in the Explore estimate.",
+  "They then grow at their current e-folding rate, slowing as they use up their share of the ring's dust, until the AGN switches off, as in the Explore estimate.",
   `When the AGN dies the gas disperses over ${GAS_CLEARING_FRACTION * 100}% of its lifetime, ending growth and clearing the sky.`,
-  "A body born above the hydrogen-burning mass is pure dust and stays unlit unless it grows by an e-fold, echoing the paper's split between frozen and growing bodies.",
-  `Once a body grows past the hydrogen-burning limit it shines as a star for 10 Gyr × (M/M☉)^−2.5, at least ${SHORTEST_STELLAR_LIFETIME_YR / 1e6} Myr, then leaves a remnant.`,
+  "Gas arrives at the paper's gas-to-pebble ratio, so grown bodies stay mostly rock.",
+  `A body shines as a star once it holds as much hydrogen as the lightest ordinary star, then lives 10 Gyr × (M/M☉)^−2.5, at least ${SHORTEST_STELLAR_LIFETIME_YR / 1e6} Myr, and leaves a remnant.`,
   "None of this timeline is in the paper.",
 ].join(" ");
 

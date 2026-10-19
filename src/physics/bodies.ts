@@ -6,6 +6,7 @@ import { accretionAt, geometricRadius, type AccretionState } from "./accretion";
 import type { ModelParams } from "./params";
 import type { PopulationSummary, RadialBin } from "./population";
 import { growthTrack, type GrowthTrack } from "./era";
+import { growthLimits } from "./growth";
 
 export interface Blanet {
   id: number;
@@ -159,7 +160,7 @@ export function blanetDetails(b: Blanet, p: ModelParams): BlanetDetails {
   const fate = fateOf({
     mass: b.mass,
     doublingTime: accretion.doublingTime,
-    thermalMass: local.thermalMass,
+    limits: growthLimits(local),
     regime: accretion.regime,
     agnLifetimeYr: p.agnLifetimeYr,
   });

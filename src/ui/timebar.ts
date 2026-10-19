@@ -20,7 +20,7 @@ function legendItems(colorBy: ColorBy): HTMLElement {
     return h(
       "div",
       { class: "legend" },
-      ...(["frozen", "growing", "star", "bhProgenitor", "imbhProgenitor"] as const).map((f) => item(cssColor(FATE_COLOR[f]), FATE_LABEL[f])),
+      ...(["frozen", "growing", "unlit", "star", "bhProgenitor", "imbhProgenitor"] as const).map((f) => item(cssColor(FATE_COLOR[f]), FATE_LABEL[f])),
     );
   }
   return h(

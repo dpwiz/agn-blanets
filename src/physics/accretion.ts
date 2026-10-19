@@ -107,13 +107,24 @@ export function pebbleAccretionRate(mass: number, ctx: AccretionContext) {
   return { rAcc, xi, mdot };
 }
 
+export function gasBondiHillMass(disk: DiskState): number {
+  return ((disk.r * disk.cs * disk.cs) / (2 * G)) ** 1.5 / Math.sqrt(3 * disk.mSmbh);
+}
+
+export function bondiGasCoefficient(disk: DiskState): number {
+  return (4 * Math.PI * G ** 3 * disk.rho) / disk.cs ** 6;
+}
+
+export function hillGasRatio(disk: DiskState): number {
+  return (4 * Math.PI * disk.rho * G) / (9 * disk.omega * disk.omega);
+}
+
+export function gasToPebbleRatio(mass: number, disk: DiskState): number {
+  return mass < gasBondiHillMass(disk) ? bondiGasCoefficient(disk) * mass * mass : hillGasRatio(disk);
+}
+
 export function gasAccretionRate(mass: number, mdotDust: number, disk: DiskState): number {
-  const rHill = hillRadius(mass, disk);
-  const rBondi = bondiRadiusGas(mass, disk);
-  if (rBondi < rHill) {
-    return (4 * Math.PI * G ** 3 * mass * mass * disk.rho * mdotDust) / disk.cs ** 6;
-  }
-  return ((4 * Math.PI * disk.rho * G) / (9 * disk.omega * disk.omega)) * mdotDust;
+  return gasToPebbleRatio(mass, disk) * mdotDust;
 }
 
 export function pebbleIsolationMass(disk: DiskState, p: ModelParams): number {

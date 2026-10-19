@@ -1,13 +1,14 @@
 import { HYDROGEN_BURNING_MASS, M_JUP, M_SUN, YR } from "./constants";
 import type { PebbleRegime } from "./accretion";
+import { grownMass, hydrogenMass, MIN_STELLAR_HYDROGEN, supplyMass, type GrowthLimits } from "./growth";
 
 export type ObjectClass = "planet" | "browndwarf" | "duststar";
-export type ObjectFate = "frozen" | "growing" | "star" | "bhProgenitor" | "imbhProgenitor";
+export type ObjectFate = "frozen" | "growing" | "unlit" | "star" | "bhProgenitor" | "imbhProgenitor";
 
 export interface FateInput {
   mass: number;
   doublingTime: number;
-  thermalMass: number;
+  limits: GrowthLimits;
   regime: PebbleRegime;
   agnLifetimeYr: number;
 }
@@ -17,6 +18,7 @@ export interface FateSummary {
   fate: ObjectFate;
   efoldings: number;
   projectedMass: number;
+  hydrogenMass: number;
 }
 
 export const DEUTERIUM_BURNING_MASS = 13 * M_JUP;
@@ -33,15 +35,18 @@ export function fateOf(input: FateInput): FateSummary {
   const efoldings = (input.agnLifetimeYr * YR) / input.doublingTime;
   const cls = objectClass(input.mass);
   if (!(efoldings >= 1)) {
-    return { objectClass: cls, fate: "frozen", efoldings, projectedMass: input.mass };
+    return { objectClass: cls, fate: "frozen", efoldings, projectedMass: input.mass, hydrogenMass: 0 };
   }
-  const ceiling = Math.max(input.thermalMass, input.mass);
-  const projectedMass = Math.min(input.mass * Math.exp(Math.min(efoldings, 700)), ceiling);
-  let fate: ObjectFate = "growing";
-  if (projectedMass >= IMBH_DIRECT_COLLAPSE_MASS) fate = "imbhProgenitor";
-  else if (projectedMass >= BH_PROGENITOR_MASS) fate = "bhProgenitor";
-  else if (projectedMass >= HYDROGEN_BURNING_MASS) fate = "star";
-  return { objectClass: cls, fate, efoldings, projectedMass };
+  const projectedMass = grownMass(input.mass, efoldings, supplyMass(input.mass, input.limits), input.limits.thermalMass);
+  const hydrogen = hydrogenMass(input.mass, projectedMass, input.limits);
+  return { objectClass: cls, fate: fateFor(projectedMass, hydrogen), efoldings, projectedMass, hydrogenMass: hydrogen };
+}
+
+function fateFor(mass: number, hydrogen: number): ObjectFate {
+  if (hydrogen < MIN_STELLAR_HYDROGEN) return mass >= HYDROGEN_BURNING_MASS ? "unlit" : "growing";
+  if (mass >= IMBH_DIRECT_COLLAPSE_MASS) return "imbhProgenitor";
+  if (mass >= BH_PROGENITOR_MASS) return "bhProgenitor";
+  return "star";
 }
 
 export const CLASS_LABEL: Record<ObjectClass, string> = {
@@ -53,6 +58,7 @@ export const CLASS_LABEL: Record<ObjectClass, string> = {
 export const FATE_LABEL: Record<ObjectFate, string> = {
   frozen: "Keeps its birth mass",
   growing: "Grows, stays sub-stellar",
+  unlit: "Grows to stellar mass, too little hydrogen to shine",
   star: "Core-accretion star",
   bhProgenitor: "Massive star → black hole",
   imbhProgenitor: "Direct-collapse IMBH candidate",

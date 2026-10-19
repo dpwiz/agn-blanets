@@ -18,6 +18,8 @@ import {
 import { diskAt } from "../physics/disk";
 import { epochState, growthTrack, radiusWhereTemperature, type Stage } from "../physics/era";
 import { fateOf, FATE_LABEL, type ObjectFate } from "../physics/fate";
+import { growthLimits } from "../physics/growth";
+import { frostLine } from "../physics/ice";
 import type { ModelParams } from "../physics/params";
 import type { PopulationSummary } from "../physics/population";
 import { sci } from "../format";
@@ -35,7 +37,7 @@ export const STAGE_LABEL: Record<Stage, string> = {
   never: "Nothing forms",
   planet: "Planets",
   browndwarf: "Brown-dwarf mass",
-  dustStar: "Stellar-mass dust balls",
+  dustStar: "Unlit stellar-mass bodies",
   star: "Stars",
   massiveStar: "Massive stars",
   remnant: "Dead stars",
@@ -44,7 +46,6 @@ export const STAGE_LABEL: Record<Stage, string> = {
 export const AMBIENT_CONTOURS: { temperature: number; label: string }[] = [
   { temperature: 373, label: "373 K" },
   { temperature: 273, label: "273 K" },
-  { temperature: 170, label: "170 K<small>water ice survives outside</small>" },
 ];
 
 export interface OverlayPaint {
@@ -71,19 +72,37 @@ function zonesOf<K extends string>(pop: PopulationSummary, keys: K[], color: (k:
   return { colors: keys.map(color), alphas: keys.map(alpha), smooth: false, contours, zoneLabels };
 }
 
-export function temperaturePaint(pop: PopulationSummary, p: ModelParams, agnDark: boolean): OverlayPaint {
+function frostMarks(pop: PopulationSummary, p: ModelParams, gasFraction: number): Pick<OverlayPaint, "contours" | "zoneLabels"> {
+  if (!(gasFraction > 0)) return { contours: [], zoneLabels: [] };
+  const frost = frostLine(p, gasFraction);
+  if (frost.radius !== null) {
+    return { contours: [{ radius: frost.radius, label: `Frost line<small>water ice on the grains ${frost.frostyInside ? "inside" : "outside"}</small>` }], zoneLabels: [] };
+  }
+  const outer = pop.bins[Math.floor(pop.bins.length * 0.75)].rMid;
+  const label = frost.everywhere ? "Water ice on every grain" : "Water stays vapour<small>too warm for frost at this gas density</small>";
+  return { contours: [], zoneLabels: [{ radius: outer, label }] };
+}
+
+export function temperaturePaint(pop: PopulationSummary, p: ModelParams, agnDark: boolean, gasFraction: number): OverlayPaint {
   const params = agnDark ? { ...p, irradiationLuminosity: 0 } : p;
   const temps = pop.bins.map((b) => (agnDark ? diskAt(b.rMid, params).temperature : b.state.disk.temperature));
   const colors = temps.map((t) => ambientColor(t));
+  const frost = frostMarks(pop, params, gasFraction);
   if (agnDark) {
     const mid = pop.bins[Math.floor(pop.bins.length / 2)].rMid;
-    return { colors, alphas: temps.map(() => 1), smooth: true, contours: [], zoneLabels: [{ radius: mid, label: `${sci(temps[0], 3)} K everywhere<small>the AGN no longer heats the gas</small>` }] };
+    return {
+      colors,
+      alphas: temps.map(() => 1),
+      smooth: true,
+      contours: frost.contours,
+      zoneLabels: [{ radius: mid, label: `${sci(temps[0], 3)} K everywhere<small>the AGN no longer heats the gas</small>` }, ...frost.zoneLabels],
+    };
   }
   const contours = AMBIENT_CONTOURS.flatMap(({ temperature, label }) => {
     const r = radiusWhereTemperature(temperature, params);
     return r === null ? [] : [{ radius: r, label }];
   });
-  return { colors, alphas: temps.map(() => 1), smooth: true, contours, zoneLabels: [] };
+  return { colors, alphas: temps.map(() => 1), smooth: true, contours: [...contours, ...frost.contours], zoneLabels: frost.zoneLabels };
 }
 
 export function fatePaint(pop: PopulationSummary, p: ModelParams): OverlayPaint {
@@ -92,7 +111,7 @@ export function fatePaint(pop: PopulationSummary, p: ModelParams): OverlayPaint 
       fateOf({
         mass: b.state.planetesimalMass,
         doublingTime: b.state.accretion.doublingTime,
-        thermalMass: b.state.thermalMass,
+        limits: growthLimits(b.state),
         regime: b.state.accretion.regime,
         agnLifetimeYr: p.agnLifetimeYr,
       }).fate,

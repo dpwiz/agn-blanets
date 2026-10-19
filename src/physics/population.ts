@@ -1,7 +1,7 @@
 import { PC } from "./constants";
 import { formsDuringAgn } from "./era";
 import { logspace } from "./math";
-import { radialState, type RadialState } from "./model";
+import { filamentsPerRing, radialState, type RadialState } from "./model";
 import type { ModelParams } from "./params";
 
 export interface RadialBin {
@@ -30,10 +30,6 @@ export function formsPlanetsAt(state: RadialState, p: ModelParams): boolean {
   return p.countingMode === "paper" || formsDuringAgn(state);
 }
 
-export function filamentsPerRing(state: RadialState, p: ModelParams): number {
-  return p.azimuthalFilaments ? (2 * Math.PI * state.disk.r) / state.disk.H : 1;
-}
-
 export function populationProfile(p: ModelParams, binCount = 200): PopulationSummary {
   const edges = logspace(p.rMinPc * PC, p.rMaxPc * PC, binCount + 1);
   const bins: RadialBin[] = [];
@@ -48,7 +44,7 @@ export function populationProfile(p: ModelParams, binCount = 200): PopulationSum
     const rMid = Math.sqrt(rInner * rOuter);
     const state = radialState(rMid, p);
     const formsPlanets = formsPlanetsAt(state, p);
-    const filaments = formsPlanets ? ((rOuter - rInner) / state.filamentWidth) * filamentsPerRing(state, p) : 0;
+    const filaments = formsPlanets ? ((rOuter - rInner) / state.filamentWidth) * filamentsPerRing(state.disk, p) : 0;
     const planets = filaments * state.planetesimalsPerFilament;
     cumulativeFilaments += filaments;
     cumulativePlanets += planets;
