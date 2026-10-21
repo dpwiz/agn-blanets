@@ -1,14 +1,19 @@
 import { blanetDetails, blanetTrack, MASS_SCATTER_DEX, type Blanet } from "../physics/bodies";
-import { epochState, livingConditions, SOLAR_CONSTANT, type Stage } from "../physics/era";
+import { accretionRateAt, epochState, livingConditions, SOLAR_CONSTANT, type Stage } from "../physics/era";
+import { hillRadius } from "../physics/accretion";
+import { iceOnGrains, ORGANICS_FRONT_K, SULFIDE_FRONT_K } from "../physics/chemistry";
+import { bodyNow, CHEMICAL_EXHAUST_SPEED, GLOWING_WORLD_POWER, kardashev, lightsItsMoons, midplaneTemperature, skyAt } from "../physics/civ";
+import { BANDS, linkBudget } from "../physics/comms";
+import type { Vec3 } from "../physics/vec";
 import { circularOrbitClockRate, clockLagPerYear } from "../physics/clocks";
-import { C_LIGHT, L_SUN, PC, YR } from "../physics/constants";
+import { C_LIGHT, G, L_SUN, M_H, PC, YR } from "../physics/constants";
 import { CLASS_LABEL, FATE_LABEL } from "../physics/fate";
-import { growthLimits } from "../physics/growth";
+import { GAS_HYDROGEN_FRACTION, growthLimits } from "../physics/growth";
 import { meanMotion, orbitalPeriod, orbitalPosition } from "../physics/kepler";
-import { surfaceEscapeSpeed } from "../physics/transfer";
-import { deriveFocus, smbhMassKg, store, type AppState } from "../state";
-import { distanceWithLight, duration, epoch, length, mass, sci, speed } from "../format";
-import { h, readout } from "./dom";
+import { hohmannDeltaV, hohmannTime, surfaceEscapeSpeed } from "../physics/transfer";
+import { agnDarkNow, commsEnvironment, deriveFocus, seedFrom, smbhMassKg, store, type AppState } from "../state";
+import { dataRate, distanceWithLight, duration, epoch, length, mass, sci, speed } from "../format";
+import { assumptionGlyph, h, readout } from "./dom";
 
 export function shearNote(s: AppState): HTMLElement {
   const omega = meanMotion(s.focus.radius, smbhMassKg(s.params));
@@ -52,11 +57,29 @@ function epochSection(s: AppState, b: Blanet): HTMLElement[] {
   return [h("h3", { text: "At this point in time" }), readout(rows)];
 }
 
+interface BodyHere {
+  mass: number;
+  radius: number;
+  accretionRate: number;
+  gasMass: number;
+  ageYr: number;
+}
+
+function bodyHere(s: AppState, b: Blanet, d: ReturnType<typeof blanetDetails>): BodyHere {
+  const track = blanetTrack(b, s.params);
+  if (!s.eraMode) {
+    return { mass: b.mass, radius: b.radius, accretionRate: d.accretion.mdotDust + d.accretion.mdotGas, gasMass: 0, ageYr: Number.isFinite(track.bornYr) ? track.bornYr : 0 };
+  }
+  const now = bodyNow(d.local, track, s.params, s.eraYr);
+  return { mass: now.mass, radius: now.radius, accretionRate: accretionRateAt(track, s.eraYr), gasMass: now.gasMass, ageYr: s.eraYr };
+}
+
 function livingSection(s: AppState, b: Blanet, d: ReturnType<typeof blanetDetails>): HTMLElement[] {
-  const live = livingConditions(d.local, b.mass, b.radius, d.accretion.mdotDust + d.accretion.mdotGas, s.params);
+  const here = bodyHere(s, b, d);
+  const live = livingConditions(d.local, here.mass, here.radius, here.accretionRate, s.params, agnDarkNow(s));
   const sky = live.skyOpticalDepth;
   return [
-    h("h3", { text: "Living here while the AGN shines" }),
+    h("h3", { text: s.eraMode ? "Living here at this time" : "Living here while the AGN shines" }),
     readout([
       ["Glow from infalling pebbles", `${sci(live.glowLuminosity, 2)} W, ${sci(live.glowLuminosity / L_SUN, 2)} L☉`],
       ["Surface glows at", `${sci(live.glowTemperature, 3)} K`],
@@ -70,6 +93,56 @@ function livingSection(s: AppState, b: Blanet, d: ReturnType<typeof blanetDetail
       text: "Our estimates from the model, not the paper's. The glow is the energy of falling pebbles and gas, using the uncompressed radius, so a real, denser body glows brighter and hotter. The sky depth counts the largest grains straight up through half the dust column. The torus surface sits at the photosphere height the paper assumes.",
     }),
   ];
+}
+
+const CIVILIZATION_NOTE = [
+  `Our estimates, beyond the paper. A world lights its moons when it glows above ${sci(GLOWING_WORLD_POWER, 1)} W with an Earth-light orbit inside its Hill radius.`,
+  "Kardashev level is (log₁₀ W − 6)/10.",
+  `Rockets use a ${speed(CHEMICAL_EXHAUST_SPEED)} chemical exhaust.`,
+  "Neighbours sit at the population's mean spacing in the dust layer, and the link uses your Signal band and rig across one spacing in the midplane.",
+].join(" ");
+
+function civilizationSection(s: AppState, b: Blanet, d: ReturnType<typeof blanetDetails>): HTMLElement[] {
+  const p = s.params;
+  const mSmbh = smbhMassKg(p);
+  const here = bodyHere(s, b, d);
+  const live = livingConditions(d.local, here.mass, here.radius, here.accretionRate, p);
+  const hill = hillRadius(here.mass, d.local.disk);
+  const lit = lightsItsMoons(live.glowLuminosity, live.earthLightDistance, here.radius, hill);
+  const sky = skyAt(p, here.ageYr);
+  const T = midplaneTemperature(d.local, p, sky);
+  const particles = (d.local.disk.rho * sky.gasFraction) / (p.meanMolecularWeight * M_H);
+  const water = !(sky.gasFraction > 0) ? "gone with the gas" : iceOnGrains(T, particles) ? "frost on the grains" : "vapour in the gas";
+  const carbon = !(sky.gasFraction > 0) || T < ORGANICS_FRONT_K ? "carbon in solids" : "carbon as CO gas";
+  const sulfur = !(sky.gasFraction > 0) || T < SULFIDE_FRONT_K ? "sulfur as iron sulfide" : "sulfur in the gas";
+  const escape = Math.sqrt((2 * G * here.mass) / here.radius);
+  const r = b.orbit.radius;
+  const bin = s.population.bins.find((x) => x.rOuter >= r) ?? s.population.bins[s.population.bins.length - 1];
+  const spacing = 0.55 * bin.planetNumberDensity ** (-1 / 3);
+  const omega = d.local.disk.omega;
+  const angle = spacing / r;
+  const near: Vec3 = [r, 0, 0];
+  const far: Vec3 = [r * Math.cos(angle), r * Math.sin(angle), 0];
+  const link = Number.isFinite(spacing) ? linkBudget(near, far, BANDS[s.band], s.rig, commsEnvironment(s)) : null;
+  const glyph = assumptionGlyph(CIVILIZATION_NOTE);
+  const seed = h("button", { class: "button quiet", type: "button", text: s.spreadSeed?.name === b.name ? "A culture spreads from here" : "Seed a culture here" });
+  seed.addEventListener("click", () => store.set({ spreadSeed: seedFrom(store.state, b), overlay: "settled", eraMode: true }));
+  const rows: [string, string, string?][] = [
+    ["Its glow now", live.glowLuminosity > 0 ? `${sci(live.glowLuminosity, 2)} W, Kardashev ${kardashev(live.glowLuminosity).toFixed(1)}` : "faded, stored heat only"],
+    ["Earth-like light for moons", live.glowLuminosity > 0 ? `${length(live.earthLightDistance)} out, Hill radius ${length(hill)}` : "none", lit ? "good" : undefined],
+    ["Hydrogen it holds", here.gasMass > 0 ? `${sci((100 * GAS_HYDROGEN_FRACTION * here.gasMass) / here.mass, 2)}% of its mass, ${mass(GAS_HYDROGEN_FRACTION * here.gasMass)}` : "none, pure dust"],
+    ["Water here", water],
+    ["Carbon and sulfur here", `${carbon}, ${sulfur}`],
+    ["Escape speed now", speed(escape)],
+    ["Chemical rocket to escape", `mass ratio e^${sci(escape / CHEMICAL_EXHAUST_SPEED, 2)}`],
+    ["Nearest neighbours", Number.isFinite(spacing) ? distanceWithLight(spacing) : "none here"],
+    ["Neighbours change every", duration(1 / (1.5 * omega))],
+  ];
+  if (Number.isFinite(spacing)) {
+    rows.push(["Hop one spacing outward", `${speed(hohmannDeltaV(r, r + spacing, mSmbh))}, ${duration(hohmannTime(r, r + spacing, mSmbh))} by Hohmann`]);
+  }
+  if (link) rows.push([`Talking to them by ${BANDS[s.band].label.split(" ·")[0]}`, link.capacity >= 1 ? dataRate(link.capacity) : "blocked", link.capacity >= 1 ? "good" : "bad"]);
+  return [h("h3", {}, "Civilization here ", glyph), readout(rows), h("div", { class: "button-row" }, seed)];
 }
 
 export function renderExplore(s: AppState): HTMLElement {
@@ -147,6 +220,7 @@ export function renderExplore(s: AppState): HTMLElement {
     ]),
     ...epochSection(s, b),
     ...livingSection(s, b, d),
+    ...civilizationSection(s, b, d),
     h("h3", { text: "Its clock" }),
     readout([
       ["Runs slow by", `${duration(clockLagPerYear(rate))} per year`],

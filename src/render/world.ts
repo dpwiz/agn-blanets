@@ -1,15 +1,18 @@
 import { Color, Group, Vector3 } from "three";
 import { blanetTrack, type Blanet } from "../physics/bodies";
+import { nicheRoutes } from "../physics/civ";
 import { linkBudget, BANDS } from "../physics/comms";
+import { hohmannArc, hohmannDeltaV, hohmannTime } from "../physics/transfer";
+import { duration, speed } from "../format";
 import { C_LIGHT, PC, YR } from "../physics/constants";
 import { orbitalPosition, orbitalPeriod, orbitPath } from "../physics/kepler";
 import { radialState } from "../physics/model";
 import { EPOCH_MAX_YR, epochState, gasRemaining } from "../physics/era";
 import { lerp, type Vec3 } from "../physics/vec";
 import { shipStateAt } from "../ship";
-import { agnDarkNow, commsEnvironment, smbhMassKg, store, type AppState } from "../state";
+import { agnDarkNow, commsEnvironment, smbhMassKg, store, TIMED_OVERLAYS, type AppState } from "../state";
 import { BIRTH_LOOK, createBodyLayer, pickNearest, type BodyLayer, type LookUp } from "./bodies";
-import { fatePaint, MidplaneOverlay, stagePaint, temperaturePaint } from "./midplane";
+import { fatePaint, MidplaneOverlay, nichePaint, resourcePaint, settledPaint, stagePaint, temperaturePaint, type OverlayPaint } from "./midplane";
 import { buildGasHaze, buildPlanetCloud, floorRadius, type CloudLayer } from "./cloud";
 import { LabelLayer, type LabelSpec } from "./labels";
 import { buildLocalDecor, type LocalDecor } from "./local";
@@ -24,6 +27,8 @@ export const LOCAL_CAMERA = { position: new Vector3(0, 16, 24), target: new Vect
 export const SWEEP_DECADES_PER_SECOND = 0.5;
 const STAGE_REPAINT_MS = 100;
 const GAS_STEPS = 20;
+const CIV_ROUTE_ANGLE = 0.6;
+const CIV_ROUTE_SPACING = 1.4;
 
 function lightTimeLabel(pc: number): string {
   const years = (pc * PC) / (C_LIGHT * YR);
@@ -41,6 +46,7 @@ export class World {
   private midplane: MidplaneOverlay | null = null;
   private paintedKey = "";
   private paintedAt = 0;
+  private painted: OverlayPaint | null = null;
   private skyKey = "";
   private localDecor: LocalDecor | null = null;
   private torusBodies: BodyLayer = createBodyLayer(7);
@@ -53,6 +59,8 @@ export class World {
   private signalLine = new PathLine(PALETTE.signal, 0.9);
   private network = new SegmentCloud();
   private route = new PathLine(PALETTE.emberHot, 1);
+  private civRouteLines = [new PathLine(PALETTE.thrust, 0.85, true), new PathLine(PALETTE.bone, 0.7, true)];
+  private civRoutes: { key: string; html: string; mid: Vec3 }[] = [];
   private map: ViewMap;
   private networkScene: Vector3[] = [];
   private lastSignalEval = 0;
@@ -63,7 +71,7 @@ export class World {
     ctx.scene.add(this.torusGroup, this.localGroup, this.overlayGroup);
     this.torusGroup.add(this.torusBodies.points);
     this.localGroup.add(this.localBodies.points);
-    this.overlayGroup.add(this.selectedOrbit.line, this.preview.line, this.shipMarker, this.signalLine.line, this.network.lines, this.route.line);
+    this.overlayGroup.add(this.selectedOrbit.line, this.preview.line, this.shipMarker, this.signalLine.line, this.network.lines, this.route.line, ...this.civRouteLines.map((l) => l.line));
     this.map = torusMap(floorRadius(store.state.params.rMinPc), store.state.zExaggeration);
     this.rebuildPopulation(store.state);
     this.rebuildLocal(store.state);
@@ -76,7 +84,8 @@ export class World {
   private onChange(s: AppState, changed: Set<keyof AppState>): void {
     if (changed.has("population")) this.rebuildPopulation(s);
     else if (changed.has("colorBy")) this.rebuildPlanets(s);
-    if (changed.has("population") || changed.has("overlay") || changed.has("eraMode") || changed.has("eraYr")) this.paintOverlay(s, true);
+    const repaint: (keyof AppState)[] = ["population", "overlay", "eraMode", "eraYr", "resourceGroup", "spreadTech", "spreadSeed"];
+    if (repaint.some((k) => changed.has(k))) this.paintOverlay(s, true);
     if (changed.has("focus") || changed.has("population")) this.rebuildLocal(s);
     if (changed.has("view")) this.applyView(s, true);
     if (changed.has("zExaggeration")) {
@@ -124,18 +133,56 @@ export class World {
     const overlay = this.midplane;
     if (!overlay) return;
     overlay.show(s.overlay !== "none");
-    if (s.overlay === "none") return;
+    if (s.overlay === "none") {
+      if (this.painted) {
+        this.painted = null;
+        this.paintedKey = "";
+        this.layCivRoutes(s);
+      }
+      return;
+    }
     const dark = agnDarkNow(s);
-    const staged = s.overlay === "fate" && s.eraMode;
+    const timed = TIMED_OVERLAYS.includes(s.overlay) || (s.overlay === "fate" && s.eraMode);
     const gas = s.eraMode ? Math.round(gasRemaining(s.eraYr, s.params) * GAS_STEPS) / GAS_STEPS : 1;
-    const key = `${s.overlay}|${s.eraMode}|${dark}|${gas}|${staged ? s.eraYr : ""}`;
+    const seed = s.spreadSeed ? `${s.spreadSeed.radius}|${s.spreadSeed.yr}` : "";
+    const key = [s.overlay, s.eraMode, dark, gas, timed ? s.eraYr : "", s.resourceGroup, s.spreadTech, seed].join("|");
     if (key === this.paintedKey) return;
     const now = performance.now();
-    if (!force && staged && now - this.paintedAt < STAGE_REPAINT_MS) return;
+    if (!force && timed && now - this.paintedAt < STAGE_REPAINT_MS) return;
     this.paintedKey = key;
     this.paintedAt = now;
-    if (s.overlay === "temperature") overlay.paint(temperaturePaint(s.population, s.params, dark, gas));
-    else overlay.paint(staged ? stagePaint(s.population, s.params, s.eraYr) : fatePaint(s.population, s.params));
+    this.painted = this.paintFor(s, dark, gas);
+    overlay.paint(this.painted);
+    this.layCivRoutes(s);
+  }
+
+  private layCivRoutes(s: AppState): void {
+    const routes = s.overlay === "niches" && this.painted ? nicheRoutes(this.painted.zones) : [];
+    const mSmbh = smbhMassKg(s.params);
+    this.civRoutes = routes.slice(0, this.civRouteLines.length).map((r, i) => {
+      const points = hohmannArc(r.from, r.to, CIV_ROUTE_ANGLE + i * CIV_ROUTE_SPACING);
+      this.civRouteLines[i].setPoints(points);
+      const cost = `${speed(hohmannDeltaV(r.from, r.to, mSmbh))}, ${duration(hohmannTime(r.from, r.to, mSmbh))}`;
+      return { key: `civ-route-${i}`, html: `${r.name}<small>${cost} by Hohmann</small>`, mid: points[Math.floor(points.length / 2)] };
+    });
+    this.civRouteLines.forEach((l, i) => {
+      if (i >= this.civRoutes.length) l.hide();
+    });
+  }
+
+  private paintFor(s: AppState, dark: boolean, gas: number): OverlayPaint {
+    switch (s.overlay) {
+      case "temperature":
+        return temperaturePaint(s.population, s.params, dark, gas);
+      case "niches":
+        return nichePaint(s.population, s.params, s.eraYr);
+      case "resources":
+        return resourcePaint(s.population, s.params, s.eraYr, s.resourceGroup);
+      case "settled":
+        return settledPaint(s.population, s.params, s.spreadSeed, s.spreadTech, s.eraYr);
+      default:
+        return s.eraMode ? stagePaint(s.population, s.params, s.eraYr) : fatePaint(s.population, s.params);
+    }
   }
 
   private bodyLook(s: AppState): LookUp {
@@ -286,6 +333,13 @@ export class World {
 
     if (s.view === "local" && s.selected) this.rebuildSelectedOrbit(s);
     this.selectedOrbit.update(this.map);
+    const showRoutes = s.view === "torus" && this.midplane?.showsLabels;
+    this.civRouteLines.forEach((l, i) => {
+      if (showRoutes && i < this.civRoutes.length) {
+        l.line.visible = true;
+        l.update(this.map);
+      } else l.line.visible = false;
+    });
     this.preview.update(this.map);
     for (const p of this.shipPaths) p.update(this.map);
     if (s.ship) {
@@ -327,7 +381,10 @@ export class World {
 
   private renderLabels(s: AppState, t: number, mSmbh: number): void {
     const specs: LabelSpec[] = [];
-    if (s.view === "torus" && this.midplane?.showsLabels) specs.push(...this.midplane.labels);
+    if (s.view === "torus" && this.midplane?.showsLabels) {
+      specs.push(...this.midplane.labels);
+      for (const r of this.civRoutes) specs.push({ key: r.key, html: r.html, className: "overlay route", position: this.map.toScene(r.mid) });
+    }
     if (s.view === "torus" && this.decor) {
       for (const r of this.decor.rings) {
         specs.push({

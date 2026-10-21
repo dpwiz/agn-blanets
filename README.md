@@ -42,6 +42,25 @@ above, or their stage at the chosen time. Explore adds estimates of conditions o
 the sky's visible-light optical depth, the climb to the torus surface). These are our estimates, not the paper's.
 The Fly tool still uses birth masses.
 
+## Civilization layer
+
+Three more midplane maps and an Explore section carry speculation about who could live in the torus. Every piece is
+tagged as our assumption; none of it is in the paper. The maps follow the timeline and switch it on when chosen.
+
+- **Who could live here** gives each ring the first niche that fits: moons of glowing worlds (a body above 10²⁵ W with
+  an Earth-light orbit inside its Hill radius), a hydrogen well (bodies at least 5% hydrogen), an oven midplane above
+  373 K or the liquid-water band at 273–373 K while the AGN shines, frost on the grains after it switches off, or cold
+  rock worlds. Dashed Hohmann arcs mark the hydrogen route out of the well and the crossing from the liquid-water band
+  to the cold realm, with their Δv and travel time.
+- **What you can mine** maps hydrogen, water, carbon, sulfur or iron held in solids, inside bodies and on free grains,
+  per square metre. It uses solar abundances, iron sulfide below 700 K, refractory organics below 500 K and water ice
+  below the frost point at the local gas density.
+- **Where a culture spreads** follows a culture seeded on a chosen body as it hops ring to ring by Hohmann transfers
+  or 1 g torchships, taking 1 kyr to settle each ring and waiting for its bodies to form.
+- Explore's **Civilization here** gives the body's glow and Kardashev level now, its moons' Earth-light orbit, the
+  hydrogen it holds, the state of water, carbon and sulfur around it, the cost of leaving it, its neighbours' spacing
+  and turnover, a hop to the next ring, and the data rate to a neighbour in the chosen Signal band.
+
 ## Calibration
 
 The paper leaves several inputs unstated. `tests/fixtures/paper-figs.json` holds curves digitized from the paper's own

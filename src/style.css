@@ -803,6 +803,25 @@ details.advanced summary {
   border-radius: 4px;
 }
 
+.map-group,
+.map-legend,
+.map-controls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.map-note {
+  font-size: 0.72rem;
+  color: var(--haze);
+}
+
+.timebar .button.compact {
+  padding: 4px 10px;
+  font-size: var(--step--1);
+}
+
 .scene-label.overlay {
   transform: translate(6px, -50%);
   color: var(--bone);
@@ -987,15 +1006,9 @@ details.advanced summary {
     display: none;
   }
 
-  .era-row .group,
-  .overlay-switch {
+  .era-row .group {
     min-width: 0;
     width: 100%;
-  }
-
-  .timebar .overlay-switch button {
-    white-space: normal;
-    line-height: 1.15;
   }
 
   .era-readout {
@@ -1011,12 +1024,6 @@ details.advanced summary {
   .era-row .group {
     flex-basis: 100%;
     order: 6;
-  }
-
-  .overlay-switch button {
-    flex: 1;
-    padding-left: 4px;
-    padding-right: 4px;
   }
 }
 

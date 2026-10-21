@@ -1,8 +1,10 @@
-import { finalizeBlanets, sampleFocusCloud, sampleImpostorCloud, sampleLandmarks, type Blanet } from "./physics/bodies";
+import { blanetTrack, finalizeBlanets, sampleFocusCloud, sampleImpostorCloud, sampleLandmarks, type Blanet } from "./physics/bodies";
 import type { BandId, CommsEnvironment, Transceiver } from "./physics/comms";
 import { DEFAULT_RIG } from "./physics/comms";
 import { smbhMass } from "./physics/disk";
 import { agnShining, gasRemaining } from "./physics/era";
+import type { ElementGroup } from "./physics/chemistry";
+import type { Seed, SpreadTech } from "./physics/civ";
 import { buildDiskTable, type DiskTable } from "./physics/disktable";
 import { PC, YR } from "./physics/constants";
 import { meanMotion } from "./physics/kepler";
@@ -17,7 +19,8 @@ export type ColorBy = "mass" | "regime" | "fate";
 export type DockTab = "explore" | "hop" | "signal" | "clocks";
 export type HopKind = "orbital" | "torch";
 export type SlotRole = "origin" | "target";
-export type Overlay = "none" | "temperature" | "fate";
+export type Overlay = "none" | "temperature" | "fate" | "niches" | "resources" | "settled";
+export const TIMED_OVERLAYS: Overlay[] = ["niches", "resources", "settled"];
 
 export interface FocusPatch {
   radius: number;
@@ -65,6 +68,9 @@ export interface AppState {
   eraMode: boolean;
   eraYr: number;
   eraSweeping: boolean;
+  resourceGroup: ElementGroup;
+  spreadTech: SpreadTech;
+  spreadSeed: (Seed & { name: string }) | null;
 }
 
 type Listener = (state: AppState, changed: Set<keyof AppState>) => void;
@@ -77,6 +83,11 @@ export const smbhMassKg = smbhMass;
 
 export function agnDarkNow(s: AppState): boolean {
   return s.eraMode && !agnShining(s.eraYr, s.params);
+}
+
+export function seedFrom(s: AppState, b: Blanet): NonNullable<AppState["spreadSeed"]> {
+  const born = blanetTrack(b, s.params).bornYr;
+  return { radius: b.orbit.radius, yr: Number.isFinite(born) ? Math.max(s.eraYr, born) : s.eraYr, name: b.name };
 }
 
 export function commsEnvironment(s: AppState): CommsEnvironment {
@@ -163,6 +174,9 @@ function initialState(): AppState {
     eraMode: false,
     eraYr: params.agnLifetimeYr / 2,
     eraSweeping: false,
+    resourceGroup: "hydrogen",
+    spreadTech: "orbital",
+    spreadSeed: null,
   };
 }
 

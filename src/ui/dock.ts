@@ -33,6 +33,7 @@ const RERENDER_ON: (keyof AppState)[] = [
   "view",
   "focus",
   "eraMode",
+  "spreadSeed",
 ];
 
 export function mountDock(root: HTMLElement, onFrame: (hook: (dt: number) => void) => void): void {

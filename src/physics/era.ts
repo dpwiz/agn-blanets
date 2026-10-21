@@ -65,6 +65,14 @@ export function finalMass(track: GrowthTrack): number {
   return massAtAge(track, track.growthEndsYr);
 }
 
+export function accretionRateAt(track: GrowthTrack, ageYr: number): number {
+  if (!(ageYr > track.bornYr) || ageYr >= track.growthEndsYr) return 0;
+  const mass = massAtAge(track, ageYr);
+  if (mass >= track.ceilingMass || !(track.supplyMass > track.birthMass)) return 0;
+  const depletion = Math.max(track.supplyMass - mass, 0) / (track.supplyMass - track.birthMass);
+  return (mass / (track.efoldingTimeYr * YR)) * depletion;
+}
+
 export function stellarLifetimeYr(mass: number): number {
   return Math.max(SUN_LIFETIME_YR * (mass / M_SUN) ** -STELLAR_LIFETIME_SLOPE, SHORTEST_STELLAR_LIFETIME_YR);
 }
@@ -118,7 +126,7 @@ export interface LivingConditions {
   agnFlux: number;
 }
 
-export function livingConditions(state: RadialState, mass: number, radius: number, accretionRate: number, p: ModelParams): LivingConditions {
+export function livingConditions(state: RadialState, mass: number, radius: number, accretionRate: number, p: ModelParams, agnDark = false): LivingConditions {
   const glowLuminosity = (G * mass * accretionRate) / radius;
   const surfaceHeight = p.photosphereHeightOverH * state.disk.H;
   return {
@@ -128,6 +136,6 @@ export function livingConditions(state: RadialState, mass: number, radius: numbe
     skyOpticalDepth: 0.5 * state.disk.sigma * p.metallicity * dustOpacity(state.dust.aMax, VISIBLE_WAVELENGTH, p.grainDensity),
     surfaceHeight,
     climbSpeed: state.disk.omega * surfaceHeight,
-    agnFlux: p.irradiationLuminosity / (4 * Math.PI * state.disk.r * state.disk.r),
+    agnFlux: agnDark ? 0 : p.irradiationLuminosity / (4 * Math.PI * state.disk.r * state.disk.r),
   };
 }

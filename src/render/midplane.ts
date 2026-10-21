@@ -16,7 +16,10 @@ import {
   Vector3,
 } from "three";
 import { diskAt } from "../physics/disk";
-import { epochState, growthTrack, radiusWhereTemperature, type Stage } from "../physics/era";
+import { epochState, radiusWhereTemperature, type Stage } from "../physics/era";
+import { GROUP_LABEL, ORGANICS_FRONT_K, SULFIDE_FRONT_K, type ElementGroup } from "../physics/chemistry";
+import { lightReach, nicheAt, resourceAt, ringTrack, settlementTimes, skyAt, type Niche, type Seed, type SpreadTech } from "../physics/civ";
+import { PC } from "../physics/constants";
 import { fateOf, FATE_LABEL, type ObjectFate } from "../physics/fate";
 import { growthLimits } from "../physics/growth";
 import { frostLine } from "../physics/ice";
@@ -24,7 +27,7 @@ import type { ModelParams } from "../physics/params";
 import type { PopulationSummary } from "../physics/population";
 import { sci } from "../format";
 import type { LabelSpec } from "./labels";
-import { ambientColor, FATE_COLOR, STAGE_COLOR } from "./palette";
+import { ambientColor, FATE_COLOR, NICHE_COLOR, rampColor, RESOURCE_STOPS, SETTLED_STOPS, STAGE_COLOR } from "./palette";
 import { torusRadius } from "./viewmap";
 
 export const OVERLAY_LABEL_FIRST_ANGLE = -2.8;
@@ -43,6 +46,20 @@ export const STAGE_LABEL: Record<Stage, string> = {
   remnant: "Dead stars",
 };
 
+export const NICHE_LABEL: Record<Niche, string> = {
+  never: "Nothing forms",
+  dustOnly: "Still dust",
+  glowMoons: "Moons of glowing worlds",
+  hydrogenWell: "Hydrogen well",
+  oven: "Oven midplane",
+  temperate: "Liquid-water band",
+  frost: "Frost on the grains",
+  coldRock: "Cold rock worlds",
+};
+
+const RESOURCE_DECADES = 6;
+const FAINT = new Color("#6d6496");
+
 export const AMBIENT_CONTOURS: { temperature: number; label: string }[] = [
   { temperature: 373, label: "373 K" },
   { temperature: 273, label: "273 K" },
@@ -54,22 +71,25 @@ export interface OverlayPaint {
   smooth: boolean;
   contours: { radius: number; label?: string }[];
   zoneLabels: { radius: number; label: string }[];
+  zones: { key: string; inner: number; outer: number }[];
 }
 
 function zonesOf<K extends string>(pop: PopulationSummary, keys: K[], color: (k: K) => Color, alpha: (k: K) => number, label: (k: K) => string): OverlayPaint {
   const contours: OverlayPaint["contours"] = [];
   const zoneLabels: OverlayPaint["zoneLabels"] = [];
+  const zones: OverlayPaint["zones"] = [];
   let start = 0;
   for (let i = 1; i <= keys.length; i++) {
     if (i < keys.length && keys[i] === keys[start]) continue;
     const span = i - start;
     const inner = pop.bins[start].rInner;
     const outer = pop.bins[i - 1].rOuter;
+    zones.push({ key: keys[start], inner, outer });
     if (span >= MIN_LABELLED_BINS && alpha(keys[start]) > 0) zoneLabels.push({ radius: Math.sqrt(inner * outer), label: label(keys[start]) });
     if (i < keys.length) contours.push({ radius: outer });
     start = i;
   }
-  return { colors: keys.map(color), alphas: keys.map(alpha), smooth: false, contours, zoneLabels };
+  return { colors: keys.map(color), alphas: keys.map(alpha), smooth: false, contours, zoneLabels, zones };
 }
 
 function frostMarks(pop: PopulationSummary, p: ModelParams, gasFraction: number): Pick<OverlayPaint, "contours" | "zoneLabels"> {
@@ -96,13 +116,14 @@ export function temperaturePaint(pop: PopulationSummary, p: ModelParams, agnDark
       smooth: true,
       contours: frost.contours,
       zoneLabels: [{ radius: mid, label: `${sci(temps[0], 3)} K everywhere<small>the AGN no longer heats the gas</small>` }, ...frost.zoneLabels],
+      zones: [],
     };
   }
   const contours = AMBIENT_CONTOURS.flatMap(({ temperature, label }) => {
     const r = radiusWhereTemperature(temperature, params);
     return r === null ? [] : [{ radius: r, label }];
   });
-  return { colors, alphas: temps.map(() => 1), smooth: true, contours: [...contours, ...frost.contours], zoneLabels: frost.zoneLabels };
+  return { colors, alphas: temps.map(() => 1), smooth: true, contours: [...contours, ...frost.contours], zoneLabels: frost.zoneLabels, zones: [] };
 }
 
 export function fatePaint(pop: PopulationSummary, p: ModelParams): OverlayPaint {
@@ -120,7 +141,7 @@ export function fatePaint(pop: PopulationSummary, p: ModelParams): OverlayPaint 
 }
 
 export function stagePaint(pop: PopulationSummary, p: ModelParams, ageYr: number): OverlayPaint {
-  const keys = pop.bins.map((b) => epochState(growthTrack(b.state, b.state.planetesimalMass, b.state.accretion.doublingTime, p), ageYr).stage);
+  const keys = pop.bins.map((b) => epochState(ringTrack(b.state, p), ageYr).stage);
   return zonesOf(
     pop,
     keys,
@@ -128,6 +149,86 @@ export function stagePaint(pop: PopulationSummary, p: ModelParams, ageYr: number
     (k) => (k === "never" ? 0.35 : k === "dust" ? 0.5 : 1),
     (k) => STAGE_LABEL[k],
   );
+}
+
+export function nichePaint(pop: PopulationSummary, p: ModelParams, ageYr: number): OverlayPaint {
+  const sky = skyAt(p, ageYr);
+  const keys = pop.bins.map((b) => nicheAt(b, p, sky));
+  return zonesOf(
+    pop,
+    keys,
+    (k) => NICHE_COLOR[k],
+    (k) => (k === "never" ? 0.25 : k === "dustOnly" ? 0.45 : 1),
+    (k) => NICHE_LABEL[k],
+  );
+}
+
+function frontContour(p: ModelParams, temperature: number, label: string): OverlayPaint["contours"] {
+  const r = radiusWhereTemperature(temperature, p);
+  return r === null ? [] : [{ radius: r, label }];
+}
+
+export function resourcePaint(pop: PopulationSummary, p: ModelParams, ageYr: number, group: ElementGroup): OverlayPaint {
+  const sky = skyAt(p, ageYr);
+  const stocks = pop.bins.map((b) => resourceAt(b, p, sky, group));
+  const solid = stocks.map((s) => s.inBodies + s.onGrains);
+  const richest = solid.reduce((best, v, i) => (v > solid[best] ? i : best), 0);
+  const top = solid[richest];
+  const floor = top / 10 ** RESOURCE_DECADES;
+  const colors = solid.map((v) => rampColor(RESOURCE_STOPS, v > 0 ? (Math.log10(v) - Math.log10(floor)) / RESOURCE_DECADES : 0));
+  const alphas = solid.map((v) => (v > floor ? 1 : 0));
+  const contours =
+    group === "carbon" && sky.shining
+      ? frontContour(p, ORGANICS_FRONT_K, "Organics condense<small>carbon in solids outside</small>")
+      : group === "sulfur" && sky.shining
+        ? frontContour(p, SULFIDE_FRONT_K, "Iron sulfide forms<small>sulfur in solids outside</small>")
+        : [];
+  const frost = group === "water" ? frostMarks(pop, sky.shining ? p : { ...p, irradiationLuminosity: 0 }, sky.gasFraction) : { contours: [], zoneLabels: [] };
+  const name = GROUP_LABEL[group];
+  const inGas = stocks.reduce((a, s) => a + s.inGas, 0);
+  const zoneLabels =
+    top > 0
+      ? [{ radius: pop.bins[richest].rMid, label: `${name} richest at ${sci(pop.bins[richest].rMid / PC, 2)} pc<small>${sci(top, 2)} kg/m², ${Math.round((100 * stocks[richest].inBodies) / top)}% inside bodies</small>` }]
+      : [{ radius: pop.bins[Math.floor(pop.bins.length / 2)].rMid, label: inGas > 0 ? `${name} only in the gas` : `${name} gone with the gas` }];
+  return { colors, alphas, smooth: true, contours: [...contours, ...frost.contours], zoneLabels: [...zoneLabels, ...frost.zoneLabels], zones: [] };
+}
+
+let lastSpread: { pop: PopulationSummary; p: ModelParams; seed: Seed; tech: SpreadTech; arrival: number[] } | null = null;
+
+function spreadFor(pop: PopulationSummary, p: ModelParams, seed: Seed, tech: SpreadTech): number[] {
+  const hit = lastSpread;
+  if (hit && hit.pop === pop && hit.p === p && hit.seed === seed && hit.tech === tech) return hit.arrival;
+  const arrival = settlementTimes(pop, p, seed, tech);
+  lastSpread = { pop, p, seed, tech, arrival };
+  return arrival;
+}
+
+export function settledPaint(pop: PopulationSummary, p: ModelParams, seed: Seed | null, tech: SpreadTech, ageYr: number): OverlayPaint {
+  const blank = pop.bins.map(() => FAINT);
+  if (!seed) {
+    return { colors: blank, alphas: pop.bins.map(() => 0), smooth: false, contours: [], zoneLabels: [{ radius: pop.bins[Math.floor(pop.bins.length / 2)].rMid, label: "Seed a culture from Explore" }], zones: [] };
+  }
+  const arrival = spreadFor(pop, p, seed, tech);
+  const reachable = arrival.filter((t) => Number.isFinite(t));
+  if (reachable.length === 0) {
+    return { colors: blank, alphas: pop.bins.map(() => 0), smooth: false, contours: [{ radius: seed.radius, label: "Founding world" }], zoneLabels: [{ radius: seed.radius, label: "No bodies form on its ring<small>the culture cannot spread</small>" }], zones: [] };
+  }
+  const span = Math.log10(Math.max(...reachable) - seed.yr + 1);
+  const settled = arrival.map((t) => t <= ageYr);
+  const colors = arrival.map((t, i) => (settled[i] ? rampColor(SETTLED_STOPS, span > 0 ? Math.log10(t - seed.yr + 1) / span : 0) : FAINT));
+  const alphas = arrival.map((t, i) => (settled[i] ? 1 : Number.isFinite(t) ? 0.25 : 0));
+  const contours: OverlayPaint["contours"] = [{ radius: seed.radius, label: "Founding world" }];
+  const reach = lightReach(seed, ageYr);
+  const rMin = pop.bins[0].rInner;
+  const rMax = pop.bins[pop.bins.length - 1].rOuter;
+  for (const r of [seed.radius - reach, seed.radius + reach]) if (r > rMin && r < rMax) contours.push({ radius: r, label: "Its first light has reached" });
+  const settledBins = pop.bins.filter((_, i) => settled[i]);
+  const how = tech === "orbital" ? "by orbital hops" : "by 1 g torchships";
+  const zoneLabels =
+    settledBins.length > 0
+      ? [{ radius: Math.sqrt(settledBins[0].rInner * settledBins[settledBins.length - 1].rOuter), label: `Settled ${sci(settledBins[0].rInner / PC, 2)}–${sci(settledBins[settledBins.length - 1].rOuter / PC, 2)} pc<small>${how}</small>` }]
+      : [];
+  return { colors, alphas, smooth: false, contours, zoneLabels, zones: [] };
 }
 
 const vertexShader = `

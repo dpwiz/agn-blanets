@@ -42,6 +42,27 @@ export function surfaceEscapeSpeed(body: Body): number {
   return Math.sqrt((2 * G * body.mass) / body.radius);
 }
 
+export function hohmannArc(r1: number, r2: number, startAngle: number, samples = 96): Vec3[] {
+  const inner = Math.min(r1, r2);
+  const outer = Math.max(r1, r2);
+  const axis = (inner + outer) / 2;
+  const e = (outer - inner) / (outer + inner);
+  return Array.from({ length: samples + 1 }, (_, i) => {
+    const anomaly = (Math.PI * i) / samples;
+    const r = (axis * (1 - e * e)) / (1 + e * Math.cos(anomaly));
+    const angle = startAngle + anomaly;
+    return [r * Math.cos(angle), r * Math.sin(angle), 0] as Vec3;
+  });
+}
+
+export function hohmannDeltaV(r1: number, r2: number, mSmbh: number): number {
+  const mu = G * mSmbh;
+  const transferAxis = (r1 + r2) / 2;
+  const leave = Math.abs(Math.sqrt(mu * (2 / r1 - 1 / transferAxis)) - Math.sqrt(mu / r1));
+  const arrive = Math.abs(Math.sqrt(mu / r2) - Math.sqrt(mu * (2 / r2 - 1 / transferAxis)));
+  return leave + arrive;
+}
+
 export function hohmannTime(r1: number, r2: number, mSmbh: number): number {
   return Math.PI * Math.sqrt(((r1 + r2) / 2) ** 3 / (G * mSmbh));
 }

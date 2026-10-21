@@ -55,6 +55,12 @@ export function sourceGlyph(key: keyof ModelParams): HTMLElement {
   return g;
 }
 
+export function assumptionGlyph(body: string): HTMLElement {
+  const g = h("span", { class: "source assumed", tabindex: 0, role: "img", "aria-label": SOURCE_LABEL.assumed });
+  attachTip(g, SOURCE_LABEL.assumed, body);
+  return g;
+}
+
 export function sourceLegend(): HTMLElement {
   const item = (source: Provenance) => h("span", {}, h("span", { class: `source ${source}` }), SOURCE_LABEL[source]);
   return h("div", { class: "legend-sources" }, item("paper"), item("calibrated"), item("assumed"));
